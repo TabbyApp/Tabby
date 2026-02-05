@@ -1,0 +1,644 @@
+# Tabby — Epics & Jira Stories by Phase
+
+Stories are split into **Backend** and **Frontend**. Each has a **Description** and **Acceptance Criteria (AC)**.
+
+---
+
+# Phase 1: Working App Core
+
+**Epic:** *Phase 1 — Working app: robustness, profile, Account page, invite/accept, payment required*
+
+Goal: App is stable, profile is real, invite-by-link works, and users must add a payment method before accepting an invite. No Plaid, no real charging, no receipt pipeline changes, no notifications.
+
+---
+
+## Phase 1 — Backend Stories
+
+### TAB-1.1 [Backend] Ensure DB and uploads directories exist and handle creation errors
+
+**Description:**  
+The server can fail with `SQLITE_CANTOPEN` if the `data/` directory does not exist or is not writable. Ensure `data/` and `uploads/` are created with `fs.mkdirSync(..., { recursive: true })` before opening the DB or writing uploads. Catch and handle creation errors so the process fails fast with a clear, logged message instead of surfacing a raw 500 to the client.
+
+**Acceptance Criteria:**
+- AC1: On startup, `data/` and `uploads/` are created if they do not exist.
+- AC2: If directory creation fails (e.g. permissions), the server logs a clear error and exits or returns a meaningful error instead of throwing unhandled.
+- AC3: SQLite DB is opened only after `data/` is confirmed; receipt upload route writes only after `uploads/` is confirmed.
+
+---
+
+### TAB-1.2 [Backend] OCR request timeout and child process cleanup
+
+**Description:**  
+Receipt upload runs OCR in a child process. If OCR hangs (e.g. bad image or Tesseract stall), the request can hang indefinitely. Add a hard timeout (e.g. 20 seconds) that kills the OCR child process when exceeded and return a client-friendly error (408 or 422) instead of leaving the request open or crashing.
+
+**Acceptance Criteria:**
+- AC1: Receipt upload enforces a configurable timeout (e.g. 20s) for the OCR step.
+- AC2: On timeout, the OCR child process is terminated (e.g. `proc.kill()`).
+- AC3: Client receives 408 or 422 with a JSON body like `{ "error": "..." }` and a clear message (e.g. "Receipt scan timed out. Please try again.").
+- AC4: No unhandled rejection or server crash on timeout.
+
+---
+
+### TAB-1.3 [Backend] Central 500 handling and request error logging
+
+**Description:**  
+Add or tighten a global error handler so every 5xx response is logged (method, path, error) and the client always receives a consistent JSON shape `{ "error": "..." }` without stack traces or internal details.
+
+**Acceptance Criteria:**
+- AC1: All unhandled errors from route handlers go through a central error middleware.
+- AC2: For 5xx responses, the server logs at least: HTTP method, path, and error message (or stack in dev only, if desired).
+- AC3: Response body is always JSON with a single `error` string; no stack or internal paths in production.
+
+---
+
+### TAB-1.4 [Backend] Group invites schema and table
+
+**Description:**  
+Add a `group_invites` table so admins can create invite links and invitees can accept by token. Schema: e.g. `id`, `group_id`, `inviter_id`, `invitee_email`, `token` (unique), `status` (e.g. 'pending' / 'accepted'), `created_at`. Add indexes on `token`, `invitee_email`, and `group_id` for lookups.
+
+**Acceptance Criteria:**
+- AC1: Table `group_invites` exists with the above columns (or equivalent).
+- AC2: `token` is unique and generated per invite (e.g. UUID or secure random).
+- AC3: Indexes exist for queries by token, invitee_email, and group_id.
+
+---
+
+### TAB-1.5 [Backend] Virtual card active flag in schema
+
+**Description:**  
+Add an `active` flag to `virtual_cards` (e.g. `active INTEGER DEFAULT 1`) so toggling a card on/off in the Virtual Wallet can be persisted and reflected after reload.
+
+**Acceptance Criteria:**
+- AC1: Column `active` exists on `virtual_cards` with default 1.
+- AC2: Existing rows are treated as active (migration or default applied).
+
+---
+
+### TAB-1.6 [Backend] PATCH /api/users/me for profile updates
+
+**Description:**  
+Implement PATCH `/api/users/me` so the user can update their profile. Accept optional body fields: `name`, `email`. Validate email format and uniqueness (excluding current user). Update the user row and return the updated user (id, email, name, created_at) without password_hash.
+
+**Acceptance Criteria:**
+- AC1: Authenticated PATCH with body `{ "name": "..." }` and/or `{ "email": "..." }` updates the user and returns updated profile.
+- AC2: If email is provided and already taken by another user, return 409 with a clear error.
+- AC3: Response does not include password_hash or refresh tokens.
+
+---
+
+### TAB-1.7 [Backend] POST /api/groups/:groupId/invites (create invite)
+
+**Description:**  
+Allow group admins (creator) to create an invite for a given email. Create a row in `group_invites` with a unique token and status 'pending'. Return `inviteId`, `token`, and an `inviteLink` (frontend base URL + path + token) so the client can copy or share the link.
+
+**Acceptance Criteria:**
+- AC1: Only the group creator (admin) can create invites; others receive 403.
+- AC2: Request body includes `inviteeEmail`; token is unique per invite.
+- AC3: Response includes `inviteId`, `token`, and `inviteLink`.
+- AC4: Invitee_email is stored in lowercase; duplicate pending invite for same group + email can be allowed or rejected (product decision; document in AC).
+
+---
+
+### TAB-1.8 [Backend] GET /api/invites/:token (public invite details)
+
+**Description:**  
+Return invite details for a valid token so the frontend can show "Accept invite to &lt;group&gt;" without requiring auth. Return group name, inviter name, invitee email, and token. If token is invalid or already accepted, return 404.
+
+**Acceptance Criteria:**
+- AC1: GET with valid pending token returns 200 and body with `groupName`, `inviterName`, `inviteeEmail`, `token`.
+- AC2: Invalid or expired token returns 404.
+- AC3: Accepted invites return 404 (or 410) so the link cannot be reused.
+
+---
+
+### TAB-1.9 [Backend] POST /api/invites/:token/accept (accept invite, payment required)
+
+**Description:**  
+Authenticated user accepts an invite by token. If the invite is valid and not yet accepted: (1) If the user has no payment methods, return 403 with body `{ "code": "PAYMENT_METHOD_REQUIRED", "error": "..." }`. (2) Otherwise add the user to the group (group_members), mark the invite as accepted, and return the group (id, name, members, etc.).
+
+**Acceptance Criteria:**
+- AC1: Only authenticated users can call accept; unauthenticated receive 401.
+- AC2: If user has zero payment methods, response is 403 with `code: "PAYMENT_METHOD_REQUIRED"`.
+- AC3: If user has at least one payment method and token is valid, user is added to group_members and invite status is updated; response is 200 with group payload.
+- AC4: Token can be accepted only once; double-accept returns 404 or 409.
+
+---
+
+### TAB-1.10 [Backend] GET /api/users/me/invites (pending invites for current user)
+
+**Description:**  
+Return a list of pending invites for the current user (match by user email to `invitee_email`). Each item includes invite id, token, group name, inviter name, and created_at so the frontend can show "You have N pending invites" and list them with Accept/Decline.
+
+**Acceptance Criteria:**
+- AC1: Authenticated GET returns only pending invites where invitee_email matches the current user's email.
+- AC2: Response is an array of objects with at least: inviteId, token, groupName, inviterName, createdAt (or equivalent).
+
+---
+
+### TAB-1.11 [Backend] PATCH /api/groups/:groupId/virtual-card (toggle active)
+
+**Description:**  
+Allow a group member to set the group's virtual card active state. Body: `{ "active": boolean }`. Update `virtual_cards.active` for that group and return the updated virtual card (e.g. id, groupId, card_number_last_four, active).
+
+**Acceptance Criteria:**
+- AC1: Only group members can update the virtual card; non-members receive 404.
+- AC2: PATCH with `{ "active": false }` sets active to 0; `true` sets to 1.
+- AC3: Response includes the updated active state and card identifier (e.g. last_four).
+
+---
+
+### TAB-1.23 [Backend] DELETE /api/groups/:groupId (delete group)
+
+**Description:**  
+Allow the group creator (admin) to delete a group. Only the creator can delete. Delete in order: group_invites, item_claims (via receipt_items), receipt_items, receipt_splits, receipts, group_members, virtual_cards, then groups. Return 204 No Content or 200 with { ok: true }. Non-admin members receive 403.
+
+**Acceptance Criteria:**
+- AC1: Only the group creator can call DELETE; other members receive 403.
+- AC2: Group and all dependent rows (invites, members, virtual card, receipts, items, claims, splits) are removed.
+- AC3: Non-members receive 404.
+- AC4: Response is 204 or 200 with success payload.
+
+---
+
+### TAB-1.24 [Backend] DELETE /api/groups/:groupId/members/:userId (remove member)
+
+**Description:**  
+Allow the group creator (admin) to remove a member from the group. Delete the row from group_members for the given group and user. The removed user must not be the creator (creator cannot be removed). Return 204 or 200 with success. Non-admin callers receive 403; removing self may be disallowed (use "leave group" instead) or allowed—document in AC.
+
+**Acceptance Criteria:**
+- AC1: Only the group creator can remove members; others receive 403.
+- AC2: Target user is removed from group_members; they lose access to the group.
+- AC3: Creator cannot be removed (return 400 or 403).
+- AC4: Optional: allow removing self (same as leave) or require leave endpoint; document choice.
+
+---
+
+### TAB-1.25 [Backend] POST /api/groups/:groupId/leave (leave group)
+
+**Description:**  
+Allow the current user to leave a group. Remove the current user from group_members for the group. If the user is the group creator, either forbid (return 400 "Creator must delete group or transfer ownership") or implement transfer-of-ownership; simplest is to forbid and require delete group or transfer in a later story.
+
+**Acceptance Criteria:**
+- AC1: Authenticated group member can call leave; their group_members row is deleted.
+- AC2: Non-member receives 404.
+- AC3: If the user is the group creator, return 400 with clear message (e.g. "Creator cannot leave; delete the group or transfer ownership") or implement transfer—product decision documented.
+
+---
+
+## Phase 1 — Frontend Stories
+
+### TAB-1.12 [Frontend] Refresh token on 401 and retry request in api client
+
+**Description:**  
+When any API request returns 401, the client should attempt to refresh the access token once (using the refresh token cookie) and retry the same request. If refresh fails, clear stored tokens and trigger logout (or redirect to login) so the user is not stuck on a broken session.
+
+**Acceptance Criteria:**
+- AC1: On 401 response, client calls POST /api/auth/refresh with credentials (cookie).
+- AC2: If refresh succeeds, client retries the original request with the new access token.
+- AC3: If refresh fails (4xx/5xx), client clears tokens and triggers logout/login flow.
+- AC4: Only one retry per request to avoid refresh loops.
+
+---
+
+### TAB-1.13 [Frontend] API client: users.updateMe, invites, groups invite and virtual card, delete group, remove member, leave group
+
+**Description:**  
+Add to the frontend API client: (1) `users.updateMe({ name?, email? })` → PATCH /users/me. (2) `invites.getByToken(token)`, `invites.accept(token)`, `invites.myPending()`. (3) `groups.createInvite(groupId, inviteeEmail)`, `groups.updateVirtualCard(groupId, active)`. (4) `groups.delete(groupId)` → DELETE /groups/:groupId. (5) `groups.removeMember(groupId, userId)` → DELETE /groups/:groupId/members/:userId. (6) `groups.leave(groupId)` → POST /groups/:groupId/leave.
+
+**Acceptance Criteria:**
+- AC1: All new methods are typed and call the correct endpoints with correct payloads.
+- AC2: Errors from the server (e.g. 403 with code) are propagated so the UI can handle PAYMENT_METHOD_REQUIRED.
+
+---
+
+### TAB-1.14 [Frontend] Account page: load real profile and show name, email
+
+**Description:**  
+On mount, Account page fetches the current user via `api.users.me()` and displays their real name and email. Remove all hardcoded "John Doe" and "john@example.com". Show a loading state while fetching and handle errors (e.g. redirect to login or show error message).
+
+**Acceptance Criteria:**
+- AC1: Account page shows the logged-in user's name and email from GET /users/me.
+- AC2: No hardcoded placeholder names or emails.
+- AC3: Loading and error states are handled (spinner or message).
+
+---
+
+### TAB-1.15 [Frontend] Account page: edit name and email
+
+**Description:**  
+Add "Edit" for name and/or email. On save, call `api.users.updateMe({ name, email })` and refresh the displayed profile. Handle validation errors (e.g. duplicate email) and show a user-friendly message.
+
+**Acceptance Criteria:**
+- AC1: User can edit name and/or email (inline or modal).
+- AC2: Save calls PATCH /users/me and updates the UI with the new values.
+- AC3: Duplicate email or server validation error is shown to the user without crashing.
+
+---
+
+### TAB-1.16 [Frontend] Account page: list payment methods from API
+
+**Description:**  
+Display the user's payment methods from `api.users.me()` (paymentMethods array). Show type (card/bank), last four digits, and brand if present. Remove hardcoded "Visa •••• 1234". If there are no payment methods, show an empty state and a clear "Add payment method" entry point.
+
+**Acceptance Criteria:**
+- AC1: Payment methods section is populated from user.paymentMethods.
+- AC2: Each method shows type, last_four (e.g. "•••• 4242"), and brand when available.
+- AC3: Empty state is shown when there are no payment methods, with a way to add one (Phase 2 will hook Plaid/card).
+
+---
+
+### TAB-1.17 [Frontend] Group detail: Invite button and create-invite UI
+
+**Description:**  
+On Group Detail, for the group creator (admin), show an "Invite" or "Invite by link" button. Clicking it opens UI to enter an email and create an invite. After creation, show the invite link (e.g. copyable) or "Invite sent" confirmation using `groups.createInvite(groupId, inviteeEmail)`.
+
+**Acceptance Criteria:**
+- AC1: Only the group creator sees the Invite button (or equivalent).
+- AC2: User can enter an email and submit; frontend calls POST /groups/:groupId/invites.
+- AC3: On success, user sees the invite link and can copy it, or a clear "Invite sent" message.
+
+---
+
+### TAB-1.18 [Frontend] Invite link route and accept-invite screen
+
+**Description:**  
+Support a route such as `/invite/:token`. If the user is not logged in, redirect to login and then back to the invite URL after login. If logged in, show a screen with group name and inviter (from GET /invites/:token) and an "Accept" button that calls `invites.accept(token)`.
+
+**Acceptance Criteria:**
+- AC1: Visiting /invite/:token loads invite details (GET /invites/:token) and shows group name and inviter.
+- AC2: If not authenticated, user is redirected to login; after login, user is sent back to /invite/:token.
+- AC3: "Accept" button calls POST /invites/:token/accept; on success, redirect to the group detail page.
+
+---
+
+### TAB-1.19 [Frontend] Handle PAYMENT_METHOD_REQUIRED on accept invite
+
+**Description:**  
+When the user clicks "Accept" on an invite and the server returns 403 with `code: "PAYMENT_METHOD_REQUIRED"`, redirect the user to add a payment method (e.g. Account page or a dedicated "Add payment method" flow). After they add a method (Phase 2), they can retry accept; for Phase 1, show a clear message that they must add a payment method first and link to Account or a placeholder "Add payment method" screen.
+
+**Acceptance Criteria:**
+- AC1: On 403 with code PAYMENT_METHOD_REQUIRED, user sees a clear message (e.g. "Add a payment method to join this group").
+- AC2: User is directed to Account page or an "Add payment method" entry point; after adding one (Phase 2), retrying accept works.
+- AC3: No crash or generic error; the flow is understandable.
+
+---
+
+### TAB-1.20 [Frontend] Pending invites on home or profile
+
+**Description:**  
+Show "You have N pending invites" (or a list) on Home or Profile, using `invites.myPending()`. Each item shows group name and inviter; user can "Accept" (call accept and then navigate to group) or optionally "Decline" if a decline endpoint exists in Phase 1 (otherwise omit decline).
+
+**Acceptance Criteria:**
+- AC1: Pending invites are fetched and displayed (e.g. on Home or in Profile/Account).
+- AC2: Accept action calls invites.accept(token) and on success navigates to group detail.
+- AC3: List updates after accepting (invite removed from list).
+
+---
+
+### TAB-1.21 [Frontend] Virtual Wallet: persist card active toggle via API
+
+**Description:**  
+When the user toggles a virtual card's active state in Virtual Wallet, call `groups.updateVirtualCard(groupId, active)` instead of only updating local state. After a successful response, update UI; on reload, the card should still show the correct active state (from API).
+
+**Acceptance Criteria:**
+- AC1: Toggling active/inactive calls PATCH /groups/:groupId/virtual-card with { active }.
+- AC2: UI reflects the new state after success; failure shows an error message.
+- AC3: Refreshing the page shows the persisted state (card still inactive if toggled off).
+
+---
+
+### TAB-1.22 [Frontend] Card Details page: real group and card data
+
+**Description:**  
+Card Details page should receive groupId (e.g. from navigation state). Fetch group and virtual card (e.g. via groups.get(groupId) or a dedicated card endpoint) and display real group name and card last four. Remove hardcoded card number and fake expiry. "View Details" from Virtual Wallet should pass groupId so Card Details shows the correct card.
+
+**Acceptance Criteria:**
+- AC1: Card Details shows real group name and card last four from API.
+- AC2: No hardcoded card number or expiry; optional: show "•••• •••• •••• {lastFour}".
+- AC3: Navigation from Virtual Wallet "View Details" passes groupId and loads the correct card.
+
+---
+
+### TAB-1.26 [Frontend] Delete group with confirmation
+
+**Description:**  
+On Group Detail, for the group creator only, show a "Delete group" or "Delete" control (e.g. in settings/menu or footer). On tap, show a confirmation dialog (e.g. "Delete this group? This cannot be undone."). On confirm, call DELETE /api/groups/:groupId, then navigate to Groups list (or home). Handle errors (e.g. 403) with a clear message.
+
+**Acceptance Criteria:**
+- AC1: Only the group creator sees the Delete group option.
+- AC2: Confirmation dialog is shown before delete; user can cancel.
+- AC3: On confirm, frontend calls DELETE /api/groups/:groupId; on success, user is navigated to Groups list (or home).
+- AC4: On 403 or other error, user sees a clear message; no crash.
+
+---
+
+### TAB-1.27 [Frontend] Remove member from group
+
+**Description:**  
+On Group Detail, for the group creator, show a way to remove a member (e.g. "Remove" or trash icon per member in the members list). Exclude the creator from the remove option. On confirm (optional confirmation dialog), call DELETE /api/groups/:groupId/members/:userId, then refresh the group so the member list updates.
+
+**Acceptance Criteria:**
+- AC1: Only the group creator sees Remove for each member (creator cannot be removed).
+- AC2: Remove action calls DELETE /api/groups/:groupId/members/:userId; on success, member list is refreshed.
+- AC3: Optional: confirmation before remove. Errors (403, 404) are handled with a clear message.
+
+---
+
+### TAB-1.28 [Frontend] Leave group option
+
+**Description:**  
+On Group Detail, for non-creator members, show a "Leave group" option. On tap, show confirmation (e.g. "Leave this group? You will lose access to its receipts and card."). On confirm, call POST /api/groups/:groupId/leave, then navigate to Groups list (or home). If the user is the creator, do not show "Leave group" (show "Delete group" instead per TAB-1.26) or show a message that they must delete the group or transfer ownership.
+
+**Acceptance Criteria:**
+- AC1: Non-creator members see "Leave group"; creator sees Delete group (or message) instead.
+- AC2: Confirmation dialog before leave; on confirm, call POST /api/groups/:groupId/leave.
+- AC3: On success, user is navigated away from the group (e.g. to Groups list).
+- AC4: If backend returns 400 (creator cannot leave), show the backend message or a clear "Creators must delete the group instead."
+
+---
+
+### TAB-1.29 [Frontend] Upload receipt only within groups (remove from main add flow)
+
+**Description:**  
+Remove "Upload receipt" (or equivalent) from the main add button / "Where would you like to start" screen. Receipt upload should only be available in context of a group—e.g. from Group Detail via an "Upload receipt" or "Add receipt" button. User selects or is already in a group, then uploads; no standalone "upload receipt and pick group later" from the global add menu.
+
+**Acceptance Criteria:**
+- AC1: The main add / "Where would you like to start" flow no longer offers "Upload receipt" as a top-level option.
+- AC2: Upload receipt is only reachable from within a group (e.g. Group Detail has "Upload receipt" / "Add receipt").
+- AC3: From Group Detail, user can upload a receipt for that group; flow unchanged (camera/gallery → OCR → items).
+- AC4: No regression: create group, create expense, and other add options remain as desired.
+
+---
+
+# Phase 2: Plaid + Charge
+
+**Epic:** *Phase 2 — Plaid (sandbox) and charge: link bank/card, charge splits (mock then Stripe)*
+
+---
+
+## Phase 2 — Backend Stories
+
+### TAB-2.1 [Backend] Plaid schema and link token endpoint
+
+**Description:**  
+Add schema to store Plaid linkage (e.g. `plaid_item_id`, `plaid_account_id` on payment_methods, or a `plaid_items` table). Implement POST /api/plaid/link-token that creates a Plaid link token (sandbox) for the current user and returns `{ linkToken }` for the frontend Plaid Link component.
+
+**Acceptance Criteria:**
+- AC1: DB can store Plaid access token and account id (per user/account).
+- AC2: POST /api/plaid/link-token returns 200 with { linkToken } (Plaid sandbox).
+- AC3: Only authenticated users can request a link token.
+
+---
+
+### TAB-2.2 [Backend] Plaid exchange token and store bank account as payment method
+
+**Description:**  
+Implement POST /api/plaid/exchange with body `{ publicToken }`. Exchange the public token for a Plaid access token, store it, fetch accounts, and create or update `payment_methods` rows (type 'bank', last_four from account mask, optional plaid_account_id). Return the created/updated payment methods or success.
+
+**Acceptance Criteria:**
+- AC1: Exchange succeeds with valid public token (Plaid sandbox); access token is stored.
+- AC2: At least one bank account is represented as a payment_method for the user (type 'bank', last_four).
+- AC3: Invalid or expired public token returns 400 with clear error.
+
+---
+
+### TAB-2.3 [Backend] POST /api/receipts/:receiptId/charge (idempotent)
+
+**Description:**  
+Implement POST /api/receipts/:receiptId/charge. Receipt must be in status 'completed' and the caller must be a group member. For each receipt_split that is not yet 'charged', charge that user's default or first payment method (mock: sleep then set status to 'charged'; later: Stripe). Update each split status to 'charged' or 'failed'. Return { charged, failed, results } and make the operation idempotent (already-charged splits are skipped).
+
+**Acceptance Criteria:**
+- AC1: Only group members can trigger charge; receipt must be completed.
+- AC2: Each pending split is processed; user's first (or default) payment method is used; split status updated to charged or failed.
+- AC3: Response includes counts and per-member result (charged/failed, optional reason).
+- AC4: Calling charge again does not double-charge; already-charged splits are skipped.
+
+---
+
+### TAB-2.4 [Backend] Resolve default or first payment method for charging
+
+**Description:**  
+When charging a user's split, resolve their payment method: if a default is set (e.g. default_payment_method_id on users or is_default on payment_methods), use it; otherwise use the first available payment method. If the user has no payment methods, mark that split as failed with reason (e.g. "No payment method").
+
+**Acceptance Criteria:**
+- AC1: Charging logic uses default payment method when set; otherwise first available.
+- AC2: When user has no payment methods, split is marked failed and reason is included in response.
+- AC3: Optional: add default_payment_method_id to users or is_default to payment_methods and an endpoint to set it (can be a separate story).
+
+---
+
+## Phase 2 — Frontend Stories
+
+### TAB-2.5 [Frontend] API client: Plaid and receipts.charge
+
+**Description:**  
+Add to api client: `plaid.getLinkToken()` → POST /plaid/link-token; `plaid.exchangePublicToken(publicToken)` → POST /plaid/exchange. Add `receipts.charge(receiptId)` → POST /receipts/:receiptId/charge.
+
+**Acceptance Criteria:**
+- AC1: Methods are typed and call correct endpoints; errors propagated.
+- AC2: receipts.charge returns typed result (charged, failed, results).
+
+---
+
+### TAB-2.6 [Frontend] Add payment method via Plaid Link (Account or dedicated flow)
+
+**Description:**  
+From Account page (or "Add payment method" entry point), integrate Plaid Link. On "Add bank account", get link token via plaid.getLinkToken(), open Plaid Link; on success, call plaid.exchangePublicToken(publicToken) and refresh user profile so the new payment method appears in the list.
+
+**Acceptance Criteria:**
+- AC1: User can open Plaid Link from Account (or dedicated screen).
+- AC2: After successful link, exchange is called and profile is refreshed; new bank account appears in payment methods list.
+- AC3: Errors (e.g. user exits Link, exchange fails) are handled with a clear message.
+
+---
+
+### TAB-2.7 [Frontend] Receipt complete flow: call charge then show Processing
+
+**Description:**  
+When the user completes itemization (clicks Complete on Receipt Items page), call `api.receipts.charge(receiptId)` and then navigate to ProcessingPaymentPage with the charge result (who charged/failed). Do not rely on a client-side timer to simulate charging; use the real charge API.
+
+**Acceptance Criteria:**
+- AC1: After "Complete", frontend calls receipts.charge(receiptId) before navigating to Processing.
+- AC2: ProcessingPaymentPage receives the charge result (splits with status charged/failed) and shows success/failure per member.
+- AC3: On finish, user is navigated to group detail (or receipt list).
+
+---
+
+### TAB-2.8 [Frontend] ProcessingPaymentPage: show charged vs failed per member
+
+**Description:**  
+Update ProcessingPaymentPage to display the actual outcome: for each member, show "Charged" or "Failed" (and optional reason, e.g. "No payment method"). If any failed, show a clear message and optionally a "Retry" or link to add payment method.
+
+**Acceptance Criteria:**
+- AC1: Each member's row shows Charged or Failed based on API result.
+- AC2: If all charged, show success message; if any failed, show which ones and why (if API provides reason).
+- AC3: No fake loading timer that ignores real charge result; UI reflects API response.
+
+---
+
+# Phase 3: Receipt Pipeline (Robust OCR)
+
+**Epic:** *Phase 3 — Receipt pipeline: preprocess, dual extractor, vote/merge, confidence, fallback to manual*
+
+---
+
+## Phase 3 — Backend Stories
+
+### TAB-3.1 [Backend] Image pre-processing for receipts
+
+**Description:**  
+Implement a pre-processing step for receipt images: deskew, denoise, increase contrast, and optionally crop to receipt region. Input: file path; output: path to processed image (temp file). Use a library such as sharp or jimp. This output will be fed to the OCR/extraction step.
+
+**Acceptance Criteria:**
+- AC1: Pre-processing runs without crashing on valid PNG/JPEG; outputs a path to a processed image.
+- AC2: Deskew and contrast steps are applied; optional crop to receipt area if feasible.
+- AC3: Invalid or corrupt images are handled with a clear error (no unhandled exception).
+
+---
+
+### TAB-3.2 [Backend] Receipt-specialized extractor (primary)
+
+**Description:**  
+Integrate a receipt-specialized extraction service or model (e.g. Google Document AI Receipt, AWS Textract, or a dedicated receipt API). Input: pre-processed image path; output: structured JSON (line items with name and price, optional total and merchant). Normalize output to a common shape (e.g. array of { name, price }) for merging.
+
+**Acceptance Criteria:**
+- AC1: Primary extractor returns an array of line items { name, price } (and optional total/merchant).
+- AC2: Handles API errors and timeouts; returns empty array or throws with clear error.
+- AC3: Output format is documented and consistent for the merge step.
+
+---
+
+### TAB-3.3 [Backend] Second extractor and vote/merge with confidence
+
+**Description:**  
+Run a second extractor (e.g. current Tesseract with different PSM or same API with different options) on the same pre-processed image. Implement a merge/vote step: compare the two result sets by field (item name, price), choose the higher-confidence or merge duplicates, and compute an overall confidence score (e.g. 0–1). Optional: add ocr_confidence and ocr_raw_json to receipts table and store result.
+
+**Acceptance Criteria:**
+- AC1: Two extraction results are produced (primary + second).
+- AC2: Merge/vote logic produces a single list of line items and an overall confidence score.
+- AC3: Low confidence (e.g. below threshold) can be used to trigger manual fallback (next story).
+
+---
+
+### TAB-3.4 [Backend] Upload flow: run pipeline and optional manual fallback flag
+
+**Description:**  
+Integrate the receipt pipeline into the upload flow: preprocess → primary extractor → second extractor → merge/vote → confidence. If confidence is below a configurable threshold, return minimal or empty items and a flag `manualEntry: true` so the frontend can show "We couldn't read everything; add items manually." Otherwise return extracted items as today. Keep existing add-item and manual flow unchanged.
+
+**Acceptance Criteria:**
+- AC1: Upload runs preprocess + dual extractor + merge; response includes line items and optionally manualEntry and confidence.
+- AC2: When confidence < threshold, manualEntry is true and items may be empty or partial; receipt is still created and user can add items manually.
+- AC3: Existing add-item endpoint and flow remain working as fallback.
+
+---
+
+### TAB-3.5 [Backend] Optional: LLM cleanup for extracted line items
+
+**Description:**  
+(Optional.) After merge, send the merged line items (and optionally raw text) to an LLM to normalize item names, fix obvious typos, and resolve conflicts. Output remains array of { name, price }. Integrate behind a feature flag or env so it can be disabled.
+
+**Acceptance Criteria:**
+- AC1: When enabled, LLM step runs after merge and returns normalized line items.
+- AC2: LLM failures do not break the pipeline; fallback to merged result without LLM.
+- AC3: No PII or card data sent to LLM; only receipt text/items.
+
+---
+
+## Phase 3 — Frontend Stories
+
+### TAB-3.6 [Frontend] Receipt upload: show manual-entry message when OCR low confidence
+
+**Description:**  
+When the upload response includes `manualEntry: true` (or equivalent), show a clear message on the receipt items screen: e.g. "We couldn't read everything. Add or edit items below." Pre-populate any items that were extracted; allow the user to add more via the existing add-item flow.
+
+**Acceptance Criteria:**
+- AC1: If server returns manualEntry true, user sees a non-blocking message encouraging manual add/edit.
+- AC2: Existing add-item and edit flows work; user can complete the receipt as today.
+- AC3: When manualEntry is false, current behavior is unchanged (items pre-filled from OCR).
+
+---
+
+# Phase 4: Notifications and Polish
+
+**Epic:** *Phase 4 — Notifications (in-app list, mark read) and polish (copy, settings, E2E)*
+
+---
+
+## Phase 4 — Backend Stories
+
+### TAB-4.1 [Backend] Notifications table and create helper
+
+**Description:**  
+Add `notifications` table: id, user_id, type, title, body, link_type, link_id, read_at, created_at. Index on user_id and read_at. Implement a helper e.g. createNotification(userId, type, title, body, linkType, linkId) and call it when: user is added to a group, invite accepted, receipt ready to claim, charge completed (optional events; start with a minimal set).
+
+**Acceptance Criteria:**
+- AC1: Table and indexes exist; helper inserts a row and returns.
+- AC2: At least one event (e.g. invite accepted or added to group) creates a notification for the relevant user.
+- AC3: link_type and link_id allow frontend to deep-link (e.g. to group or receipt).
+
+---
+
+### TAB-4.2 [Backend] GET /api/notifications and PATCH /api/notifications/:id/read
+
+**Description:**  
+GET /api/notifications returns paginated notifications for the current user (unread first, then by created_at desc). PATCH /api/notifications/:id/read marks a notification as read (set read_at). Optionally: PATCH /api/notifications/read-all to mark all as read.
+
+**Acceptance Criteria:**
+- AC1: GET returns only the current user's notifications; supports limit/offset or cursor.
+- AC2: PATCH :id/read sets read_at for that notification; returns 200.
+- AC3: Unauthorized or wrong user returns 404 for PATCH.
+
+---
+
+## Phase 4 — Frontend Stories
+
+### TAB-4.3 [Frontend] Notifications list and mark read
+
+**Description:**  
+Add a way to view in-app notifications (e.g. from Home or Profile): fetch GET /notifications, display list with title, body, and time; link to group/receipt/activity using link_type and link_id. Allow "Mark as read" per item and optionally "Mark all read".
+
+**Acceptance Criteria:**
+- AC1: User can open a notifications list; items show title, body, and link to the relevant screen.
+- AC2: Mark as read updates the item (PATCH) and UI (e.g. unread indicator).
+- AC3: Empty state when there are no notifications.
+
+---
+
+### TAB-4.4 [Frontend] Create Group copy and invite-after-create (optional)
+
+**Description:**  
+Clarify copy on Create Group: e.g. "Add by email (they'll be members if they have an account)" and "Or send invite links after creating the group." Optionally: after group creation, for emails that didn't match an existing user, offer to "Send invite" and call POST /groups/:id/invites for each.
+
+**Acceptance Criteria:**
+- AC1: Copy clearly distinguishes add-by-email vs invite-by-link.
+- AC2: Optional: after create, show unmatched emails and allow sending invites via API.
+- AC3: No regression in existing create-group flow.
+
+---
+
+### TAB-4.5 [Frontend] E2E and polish: full flow and error cases
+
+**Description:**  
+Run through full flow: signup → add payment (Plaid) → create group → invite by link → accept (with payment gate) → add receipt → OCR/manual items → assign items (multi-split) → complete → charge → see activity. Verify: logged-out invite link → login → accept; charge failure when user has no payment method; virtual card toggle persists after reload. Fix any missing API or UI to reach "no misses."
+
+**Acceptance Criteria:**
+- AC1: Full happy path works end-to-end without manual DB or console fixes.
+- AC2: Invite link works when user was logged out (login then accept).
+- AC3: Charge failure (e.g. no payment method) shows failed state and does not break the app.
+- AC4: Virtual card toggle state persists after page reload.
+- AC5: No critical console errors or 500s on the main flows.
+
+---
+
+# Summary
+
+| Phase | Epic focus | Backend stories | Frontend stories |
+|-------|------------|-----------------|------------------|
+| 1 | Working app core | TAB-1.1 – TAB-1.11, TAB-1.23 – TAB-1.25 | TAB-1.12 – TAB-1.22, TAB-1.26 – TAB-1.29 |
+| 2 | Plaid + charge | TAB-2.1 – TAB-2.4 | TAB-2.5 – TAB-2.8 |
+| 3 | Receipt pipeline | TAB-3.1 – TAB-3.5 | TAB-3.6 |
+| 4 | Notifications and polish | TAB-4.1 – TAB-4.2 | TAB-4.3 – TAB-4.5 |
+
+**Phase 1 additions:** Delete group (TAB-1.23 backend, TAB-1.26 frontend), remove member (TAB-1.24 backend, TAB-1.27 frontend), leave group (TAB-1.25 backend, TAB-1.28 frontend), upload receipt only in groups (TAB-1.29 frontend). API client (TAB-1.13) extended with groups.delete, groups.removeMember, groups.leave.
+
+You can copy each story (title, description, AC) into Jira; use **Backend** / **Frontend** labels or components to separate them.
