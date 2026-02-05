@@ -1,6 +1,18 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const TOKEN_KEY = 'tabby_access_token';
 
+const DASHBOARD_CACHE_TTL_MS = 25_000; // 25s – instant when navigating back to home
+type DashboardData = {
+  groups: { id: string; name: string; memberCount: number; cardLastFour: string | null; createdAt?: string }[];
+  virtualCards: { groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[];
+  pendingInvites: { inviteId: string; token: string; groupName: string; inviterName: string; createdAt: string }[];
+};
+let dashboardCache: { data: DashboardData; ts: number } | null = null;
+
+export function invalidateDashboardCache() {
+  dashboardCache = null;
+}
+
 function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
@@ -89,7 +101,10 @@ async function request<T>(
 
   if (!res.ok) {
     const errMsg = (data as { error?: string })?.error || `Request failed: ${res.status}`;
-    throw new Error(errMsg);
+    const err = new Error(errMsg) as Error & { code?: string };
+    const code = (data as { code?: string })?.code;
+    if (code) err.code = code;
+    throw err;
   }
 
   return data;
@@ -98,39 +113,136 @@ async function request<T>(
 export const api = {
   auth: {
     signup: (email: string, password: string, name: string) =>
-      request<{ accessToken: string; user: { id: string; email: string; name: string } }>('/auth/signup', {
+      request<{ accessToken: string; user: { id: string; email: string; name: string; phone?: string } }>('/auth/signup', {
         method: 'POST',
         body: JSON.stringify({ email, password, name }),
         skipAuth: true,
       }),
     login: (email: string, password: string) =>
-      request<{ accessToken: string; user: { id: string; email: string; name: string } }>('/auth/login', {
+      request<{ accessToken: string; user: { id: string; email: string; name: string; phone?: string } }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
+        skipAuth: true,
+      }),
+    sendOtp: (phone: string) =>
+      request<{ ok: boolean; message: string; code?: string }>('/auth/send-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone }),
+        skipAuth: true,
+      }),
+    verifyOtp: (phone: string, code: string, name?: string) =>
+      request<{ accessToken: string; user: { id: string; email: string; name: string; phone?: string } }>('/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone, code, name }),
         skipAuth: true,
       }),
     logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
   },
   users: {
     me: () => request<{ id: string; email: string; name: string; paymentMethods: unknown[] }>('/users/me'),
+    /** Single request for home: groups + cards + invites. Cached for instant back-navigation. */
+    dashboard: (opts?: { revalidate?: boolean }): Promise<DashboardData> => {
+      const useCache = dashboardCache && (Date.now() - dashboardCache.ts < DASHBOARD_CACHE_TTL_MS) && !opts?.revalidate;
+      if (useCache) {
+        const stale = Date.now() - dashboardCache!.ts > 5000;
+        if (stale) {
+          request<DashboardData>('/users/me/dashboard').then((data) => {
+            dashboardCache = { data, ts: Date.now() };
+          }).catch(() => {});
+        }
+        return Promise.resolve(dashboardCache!.data);
+      }
+      return request<DashboardData>('/users/me/dashboard').then((data) => {
+        dashboardCache = { data, ts: Date.now() };
+        return data;
+      });
+    },
+    myPendingInvites: () =>
+      request<{ inviteId: string; token: string; groupName: string; inviterName: string; createdAt: string }[]>(
+        '/users/me/invites'
+      ),
     addPaymentMethod: (type: 'bank' | 'card', lastFour: string, brand?: string) =>
       request<{ id: string; type: string; last_four: string; brand: string | null }>(
         '/users/payment-methods',
         { method: 'POST', body: JSON.stringify({ type, lastFour, brand }) }
       ),
   },
+  plaid: {
+    getLinkToken: () =>
+      request<{ linkToken: string }>('/plaid/link-token', { method: 'POST' }),
+    exchangePublicToken: (publicToken: string) =>
+      request<{ ok: boolean; paymentMethods: { id: string; type: string; last_four: string; brand: string | null }[] }>(
+        '/plaid/exchange',
+        { method: 'POST', body: JSON.stringify({ public_token: publicToken }) }
+      ),
+  },
+  invites: {
+    getByToken: (token: string) =>
+      request<{ inviteId: string; groupId: string; groupName: string; inviterName: string; inviteeEmail: string; token: string; createdAt: string }>(
+        `/invites/${encodeURIComponent(token)}`,
+        { skipAuth: true }
+      ),
+    accept: (token: string) =>
+      request<{ id: string; name: string; members: { id: string; name: string; email: string }[]; cardLastFour: string | null }>(
+        `/invites/${encodeURIComponent(token)}/accept`,
+        { method: 'POST' }
+      ).then((r) => {
+        invalidateDashboardCache();
+        return r;
+      }),
+    decline: (token: string) =>
+      request<void>(`/invites/${encodeURIComponent(token)}`, { method: 'DELETE' }).then((r) => {
+        invalidateDashboardCache();
+        return r;
+      }),
+  },
   groups: {
-    list: () =>
-      request<{ id: string; name: string; memberCount: number; cardLastFour: string | null }[]>('/groups'),
-    create: (name: string, memberEmails?: string[]) =>
-      request<{ id: string; name: string; memberCount: number; cardLastFour: string }>('/groups', {
+    list: () => {
+      if (dashboardCache && Date.now() - dashboardCache.ts < DASHBOARD_CACHE_TTL_MS) {
+        return Promise.resolve(dashboardCache.data.groups);
+      }
+      return request<{ id: string; name: string; memberCount: number; cardLastFour: string | null }[]>('/groups');
+    },
+    create: (name: string, memberPhones?: string[]) =>
+      request<{ id: string; name: string; memberCount: number; cardLastFour: string; members: { phone: string; status: 'joined' | 'invited' }[] }>('/groups', {
         method: 'POST',
-        body: JSON.stringify({ name, memberEmails }),
+        body: JSON.stringify({ name, memberPhones: memberPhones ?? [] }),
+      }).then((r) => {
+        invalidateDashboardCache();
+        return r;
+      }),
+    resendPhoneInvite: (groupId: string, inviteId: string) =>
+      request<{ ok: boolean; message: string }>(`/groups/${groupId}/phone-invites/${inviteId}/resend`, {
+        method: 'POST',
+      }),
+    removePhoneInvite: (groupId: string, inviteId: string) =>
+      request<void>(`/groups/${groupId}/phone-invites/${inviteId}`, {
+        method: 'DELETE',
       }),
     get: (groupId: string) =>
-      request<{ id: string; name: string; members: { id: string; name: string; email: string }[]; cardLastFour: string | null }>(
+      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; phone: string | null; status: 'joined' }[]; pendingInvites: { id: string; phone: string; token: string; createdAt: string; status: 'invited' }[]; cardLastFour: string | null }>(
         `/groups/${groupId}`
       ),
+    createInvite: (groupId: string, inviteeEmail?: string) =>
+      request<{ inviteId: string; token: string; inviteLink: string }>(`/groups/${groupId}/invites`, {
+        method: 'POST',
+        body: JSON.stringify(inviteeEmail ? { inviteeEmail: inviteeEmail.trim().toLowerCase() } : {}),
+      }),
+    delete: (groupId: string) =>
+      request<void>(`/groups/${groupId}`, { method: 'DELETE' }).then((r) => {
+        invalidateDashboardCache();
+        return r;
+      }),
+    removeMember: (groupId: string, userId: string) =>
+      request<void>(`/groups/${groupId}/members/${userId}`, { method: 'DELETE' }).then((r) => {
+        invalidateDashboardCache();
+        return r;
+      }),
+    leave: (groupId: string) =>
+      request<void>(`/groups/${groupId}/leave`, { method: 'POST' }).then((r) => {
+        invalidateDashboardCache();
+        return r;
+      }),
     virtualCards: () =>
       request<{ groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[]>(
         '/groups/virtual-cards/list'

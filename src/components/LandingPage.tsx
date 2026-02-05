@@ -23,10 +23,10 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    Promise.all([api.groups.list(), api.groups.virtualCards()])
-      .then(([gList, cList]) => {
-        setGroups(gList);
-        setCards(cList);
+    api.users.dashboard({ revalidate: true })
+      .then((dashboardData) => {
+        setGroups(dashboardData.groups);
+        setCards(dashboardData.virtualCards);
       })
       .catch((err) => {
         setGroups([]);
@@ -35,6 +35,7 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
       })
       .finally(() => setLoading(false));
   }, []);
+
 
   useEffect(() => {
     load();
@@ -49,7 +50,7 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
       <motion.div 
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5 }}
+        transition={{ duration: 0.2 }}
         className="px-5 pt-6 pb-4 flex items-center justify-between"
       >
         <div className="flex items-center gap-3">

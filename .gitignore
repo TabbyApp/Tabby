@@ -1,0 +1,22 @@
+node_modules
+.env
+*.env
+server/.env
+
+# Build outputs
+server/dist/
+dist/
+
+# Database files
+data/*.db
+*.db
+
+# User uploads
+server/uploads/*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
