@@ -1,12 +1,11 @@
-import React, { useState } from 'react';
-import { ErrorBoundary } from './components/ErrorBoundary';
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from './contexts/AuthContext';
+import { api, invalidateDashboardCache } from './lib/api';
 import { SplashScreen } from './components/SplashScreen';
 import { LoginSignup } from './components/LoginSignup';
 import { LandingPage } from './components/LandingPage';
 import { GroupsPage } from './components/GroupsPage';
-import { GroupDetailPage } from './components/GroupDetailPage';
 import { ActivityPage } from './components/ActivityPage';
-import { CreateExpensePage } from './components/CreateExpensePage';
 import { AccountPage } from './components/AccountPage';
 import { SettingsPage } from './components/SettingsPage';
 import { VirtualWalletPage } from './components/VirtualWalletPage';
@@ -15,45 +14,191 @@ import { CreateGroupPage } from './components/CreateGroupPage';
 import { ReceiptScanPage } from './components/ReceiptScanPage';
 import { ReceiptItemsPage } from './components/ReceiptItemsPage';
 import { ProcessingPaymentPage } from './components/ProcessingPaymentPage';
-import { InviteAcceptPage } from './components/InviteAcceptPage';
-import { useAuth } from './contexts/AuthContext';
+import { GroupDetailPage } from './components/GroupDetailPage';
+import { NotificationsSettingsPage } from './components/NotificationsSettingsPage';
+import { NotificationsPage } from './components/NotificationsPage';
+import { PrivacySettingsPage } from './components/PrivacySettingsPage';
+import { HelpSupportPage } from './components/HelpSupportPage';
+import { AppearanceSettingsPage } from './components/AppearanceSettingsPage';
+import { ChangePasswordPage } from './components/ChangePasswordPage';
+import { TwoFactorAuthPage } from './components/TwoFactorAuthPage';
+import { ForgotPasswordPage } from './components/ForgotPasswordPage';
+import { AcceptInvitePage } from './components/AcceptInvitePage';
+import { ProAccountPage } from './components/ProAccountPage';
 
-export type PageType = 'home' | 'groups' | 'groupDetail' | 'activity' | 'create' | 'account' | 'settings' |
-  'wallet' | 'cardDetails' | 'createGroup' | 'receiptScan' | 'receiptItems' | 'processing' | 'inviteAccept';
+export type PageType = 'home' | 'groups' | 'activity' | 'account' | 'settings' | 
+  'wallet' | 'cardDetails' | 'createGroup' | 'receiptScan' | 'receiptItems' | 'processing' |
+  'groupDetail' | 'notifications' | 'notificationsSettings' | 'privacySettings' | 'helpSupport' | 
+  'appearanceSettings' | 'changePassword' | 'twoFactorAuth' | 'forgotPassword' | 'acceptInvite' | 'proAccount';
 
-export type PageState = {
-  page: PageType;
-  groupId?: string;
-  receiptId?: string;
-  splits?: { user_id: string; amount: number; name: string }[];
-  inviteToken?: string;
-};
+const GROUP_COLORS = ['#3B82F6', '#A855F7', '#22C55E', '#F97316', '#EC4899'];
 
-function getInitialStateFromUrl(): PageState {
-  if (typeof window === 'undefined') return { page: 'home' };
-  const m = window.location.pathname.match(/^\/invite\/([^/]+)$/);
-  if (m) return { page: 'inviteAccept', inviteToken: m[1] };
-  return { page: 'home' };
+function mapDashboardToGroups(dashboard: { groups: { id: string; name: string; memberCount: number; cardLastFour: string | null; createdAt?: string; createdBy?: string }[] }) {
+  return dashboard.groups.map((g, i) => ({
+    id: g.id,
+    name: g.name,
+    members: g.memberCount,
+    balance: 0,
+    color: GROUP_COLORS[i % GROUP_COLORS.length],
+    createdBy: g.createdBy ?? '',
+  }));
 }
 
 export default function App() {
-  const [showSplash, setShowSplash] = useState(true);
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, login, signup, logout } = useAuth();
   const isAuthenticated = !!user;
-  const [pageState, setPageState] = useState<PageState>(getInitialStateFromUrl);
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const currentUserId = user?.id ?? '';
 
-  const setCurrentPage = (pageOrState: PageType | PageState) => {
-    if (typeof pageOrState === 'object') {
-      setPageState(pageOrState);
-    } else {
-      setPageState({ page: pageOrState });
+  const [showSplash, setShowSplash] = useState(true);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [currentPage, setCurrentPage] = useState<PageType>('home');
+  const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [acceptInviteToken, setAcceptInviteToken] = useState<string | null>(null);
+  const [pageHistory, setPageHistory] = useState<PageType[]>([]);
+  const [accountType, setAccountType] = useState<'standard' | 'pro'>('standard');
+  const [processingGroupId, setProcessingGroupId] = useState<string | null>(null);
+  const [receiptData, setReceiptData] = useState<{
+    members: Array<{ id: number; name: string; amount: number; avatar: string }>;
+    total: number;
+  } | null>(null);
+
+  // Groups and pending invites from API
+  const [groups, setGroups] = useState<Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>>([]);
+  const [pendingInvites, setPendingInvites] = useState<Array<{ id: string; token: string; groupName: string; inviterName: string; members: number }>>([]);
+  const [recentGroups, setRecentGroups] = useState<Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string; deletedAt: Date }>>([]);
+
+  const loadDashboard = useCallback(() => {
+    if (!user) return;
+    api.users.dashboard({ revalidate: true }).then((data) => {
+      setGroups(mapDashboardToGroups(data));
+      setPendingInvites(
+        data.pendingInvites.map((inv) => ({
+          id: inv.inviteId,
+          token: inv.token,
+          groupName: inv.groupName,
+          inviterName: inv.inviterName,
+          members: 0,
+        }))
+      );
+    }).catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) {
+      setGroups([]);
+      setPendingInvites([]);
+      return;
+    }
+    loadDashboard();
+  }, [user, loadDashboard]);
+
+  // Open accept-invite from URL (?invite=TOKEN or #invite/TOKEN)
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromQuery = params.get('invite') || params.get('token');
+    const hash = window.location.hash.slice(1);
+    const tokenFromHash = hash.startsWith('invite/') ? hash.replace('invite/', '') : null;
+    const token = tokenFromQuery || tokenFromHash;
+    if (token) {
+      setAcceptInviteToken(token);
+      setCurrentPage('acceptInvite');
+    }
+  }, [user]);
+
+  const [notifications, setNotifications] = useState([
+    { id: 1, type: 'invite', title: 'Group Invitation', message: 'Sarah Mitchell invited you to Weekend Brunch Club', time: '5m ago', read: false },
+    { id: 2, type: 'receipt', title: 'New Receipt', message: 'Mike added a receipt to Lunch Squad for $45.80', time: '2h ago', read: false },
+    { id: 3, type: 'payment', title: 'Payment Processed', message: 'Your payment of $15.50 to Lunch Squad was successful', time: '1d ago', read: true },
+    { id: 4, type: 'group', title: 'Group Update', message: 'Emma Davis joined Office Lunch', time: '2d ago', read: true },
+  ]);
+
+  const acceptInvite = (token: string) => {
+    setAcceptInviteToken(token);
+    setCurrentPage('acceptInvite');
+  };
+
+  const declineInviteByToken = (token: string) => {
+    api.invites.decline(token).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {});
+  };
+
+  const unreadNotificationCount = notifications.filter(n => !n.read).length;
+
+  const deleteGroup = (groupId: string) => {
+    const groupToDelete = groups.find(g => g.id === groupId);
+    if (groupToDelete) {
+      setRecentGroups(prev => [...prev, { ...groupToDelete, deletedAt: new Date() }]);
+    }
+    setGroups(prev => prev.filter(g => g.id !== groupId));
+    api.groups.delete(groupId).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {
+      loadDashboard(); // Revert UI on failure
+    });
+  };
+
+  const leaveGroup = (groupId: string) => {
+    setGroups(prev => prev.filter(g => g.id !== groupId));
+    api.groups.leave(groupId).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {
+      loadDashboard(); // Revert UI on failure
+    });
+  };
+
+  const addGroup = async (name: string, memberEmails: string[]): Promise<string> => {
+    const group = await api.groups.create(name, []);
+    await Promise.all(
+      memberEmails.filter((e) => e.trim()).map((email) => api.groups.createInvite(group.id, email.trim().toLowerCase()).catch(() => {}))
+    );
+    invalidateDashboardCache();
+    loadDashboard();
+    return group.id;
+  };
+
+  // Determine actual theme based on preference
+  const theme = themePreference === 'system' 
+    ? 'light' // In real app, this would check window.matchMedia('(prefers-color-scheme: dark)').matches
+    : themePreference;
+
+  const handleNavigate = (page: PageType, groupId?: string | number) => {
+    setPageHistory(prev => [...prev, currentPage]);
+    setCurrentPage(page);
+    const id = groupId !== undefined ? String(groupId) : null;
+    if (id !== null) {
+      setSelectedGroupId(id);
+      if (page === 'receiptScan') {
+        setProcessingGroupId(id);
+      }
     }
   };
-  const currentPage = pageState.page;
+
+  const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
+    setThemePreference(newTheme);
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setCurrentPage('home');
+    setPageHistory([]);
+    setGroups([]);
+    setPendingInvites([]);
+    setAcceptInviteToken(null);
+  };
+
+  const handleUpgradeToPro = (duration: '1week' | '1month' | '6months' | '1year') => {
+    // In real app, this would process payment
+    console.log(`Upgrading to Pro for ${duration}`);
+    setAccountType('pro');
+  };
 
   return (
-    <ErrorBoundary>
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-black'}`}>
       <div className={`mx-auto max-w-[430px] h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-[#F2F2F7]'} relative overflow-hidden`}>
         {/* iOS Status Bar */}
@@ -77,56 +222,90 @@ export default function App() {
         </div>
 
         {showSplash ? (
-          <SplashScreen
-            onComplete={() => setShowSplash(false)}
-            ready={!authLoading}
-          />
+          <SplashScreen onComplete={() => setShowSplash(false)} />
+        ) : authLoading ? (
+          <div className="flex items-center justify-center h-[calc(100vh-48px-24px)]">
+            <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : showForgotPassword ? (
+          <ForgotPasswordPage onNavigate={handleNavigate} onBack={() => setShowForgotPassword(false)} theme={theme} />
         ) : !isAuthenticated ? (
-          <LoginSignup onAuthenticate={() => {}} />
-        ) : pageState.page === 'inviteAccept' && pageState.inviteToken ? (
-          <InviteAcceptPage
-            inviteToken={pageState.inviteToken}
-            onNavigate={setCurrentPage}
-            theme={theme}
-          />
+          <LoginSignup onForgotPassword={() => setShowForgotPassword(true)} />
         ) : (
           <>
-            {pageState.page === 'home' && <LandingPage key="home" onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'groups' && <GroupsPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'groupDetail' && pageState.groupId && (
-              <GroupDetailPage groupId={pageState.groupId} onNavigate={setCurrentPage} theme={theme} />
-            )}
-            {pageState.page === 'activity' && <ActivityPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'create' && <CreateExpensePage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'account' && <AccountPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'settings' && <SettingsPage onNavigate={setCurrentPage} theme={theme} onThemeChange={setTheme} />}
-            {pageState.page === 'wallet' && <VirtualWalletPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'cardDetails' && <CardDetailsPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'createGroup' && <CreateGroupPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'receiptScan' && (
-              <ReceiptScanPage
-                groupId={pageState.groupId}
-                onNavigate={setCurrentPage}
+            {currentPage === 'home' && <LandingPage 
+              onNavigate={handleNavigate} 
+              theme={theme} 
+              groups={groups} 
+              unreadNotificationCount={unreadNotificationCount}
+              pendingInvites={pendingInvites}
+              acceptInvite={acceptInvite}
+              declineInvite={declineInviteByToken}
+            />}
+            {currentPage === 'groups' && <GroupsPage 
+              onNavigate={handleNavigate} 
+              theme={theme} 
+              groups={groups} 
+              recentGroups={recentGroups}
+              accountType={accountType}
+              deleteGroup={deleteGroup} 
+              leaveGroup={leaveGroup} 
+              currentUserId={currentUserId} 
+            />}
+            {currentPage === 'activity' && <ActivityPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'account' && <AccountPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'settings' && <SettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} onLogout={handleLogout} />}
+            {currentPage === 'wallet' && <VirtualWalletPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'cardDetails' && <CardDetailsPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'createGroup' && <CreateGroupPage onNavigate={handleNavigate} theme={theme} addGroup={addGroup} />}
+            {currentPage === 'receiptScan' && <ReceiptScanPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'receiptItems' && <ReceiptItemsPage 
+              onNavigate={handleNavigate} 
+              theme={theme} 
+              setReceiptData={setReceiptData}
+            />}
+            {currentPage === 'processing' && <ProcessingPaymentPage 
+              onNavigate={handleNavigate} 
+              theme={theme} 
+              groupId={processingGroupId}
+              accountType={accountType}
+              deleteGroup={deleteGroup}
+              receiptData={receiptData}
+            />}
+            {currentPage === 'groupDetail' && <GroupDetailPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId} groups={groups} deleteGroup={deleteGroup} leaveGroup={leaveGroup} currentUserId={currentUserId} />}
+            {currentPage === 'notifications' && <NotificationsPage 
+              onNavigate={handleNavigate} 
+              theme={theme} 
+              notifications={notifications} 
+              setNotifications={setNotifications}
+              unreadCount={unreadNotificationCount} 
+            />}
+            {currentPage === 'notificationsSettings' && <NotificationsSettingsPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'privacySettings' && <PrivacySettingsPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'helpSupport' && <HelpSupportPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'appearanceSettings' && <AppearanceSettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} themePreference={themePreference} />}
+            {currentPage === 'changePassword' && <ChangePasswordPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'twoFactorAuth' && <TwoFactorAuthPage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'acceptInvite' && acceptInviteToken && (
+              <AcceptInvitePage
+                onNavigate={handleNavigate}
                 theme={theme}
+                inviteToken={acceptInviteToken}
+                onAcceptSuccess={(groupId) => {
+                  setAcceptInviteToken(null);
+                  invalidateDashboardCache();
+                  loadDashboard();
+                  handleNavigate('groupDetail', groupId);
+                }}
+                onDeclineSuccess={() => {
+                  setAcceptInviteToken(null);
+                  invalidateDashboardCache();
+                  loadDashboard();
+                  handleNavigate('home');
+                }}
               />
             )}
-            {pageState.page === 'receiptItems' && pageState.receiptId && pageState.groupId && (
-              <ReceiptItemsPage
-                receiptId={pageState.receiptId}
-                groupId={pageState.groupId}
-                onNavigate={setCurrentPage}
-                theme={theme}
-              />
-            )}
-            {pageState.page === 'processing' && (
-              <ProcessingPaymentPage
-                groupId={pageState.groupId}
-                splits={pageState.splits ?? []}
-                currentUserId={user?.id}
-                onNavigate={setCurrentPage}
-                theme={theme}
-              />
-            )}
+            {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
           </>
         )}
 
@@ -134,6 +313,5 @@ export default function App() {
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-black rounded-full opacity-40" />
       </div>
     </div>
-    </ErrorBoundary>
   );
 }
