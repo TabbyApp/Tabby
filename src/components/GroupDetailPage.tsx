@@ -1,526 +1,473 @@
-import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
-import { ChevronLeft, Users, CreditCard, Upload, Receipt, UserPlus, Copy, Trash2, LogOut, Loader } from 'lucide-react';
-import QRCode from 'qrcode';
-import { api } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
-import type { PageType, PageState } from '../App';
+import { ChevronLeft, Users, Receipt, Trash2, UserMinus, LogOut, Plus, MoreVertical } from 'lucide-react';
+import { useState } from 'react';
+import { PageType } from '../App';
 
 interface GroupDetailPageProps {
-  groupId: string;
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: number) => void;
   theme: 'light' | 'dark';
+  groupId: number | null;
+  groups: Array<{ id: number; name: string; members: number; balance: number; color: string; createdBy: number }>;
+  deleteGroup: (groupId: number) => void;
+  leaveGroup: (groupId: number) => void;
+  currentUserId: number;
 }
 
-type GroupReceipt = {
-  id: string;
-  status: string;
-  total: number | null;
-  created_at: string;
-  splits: { user_id: string; amount: number; status: string; name: string }[];
-};
-
-export function GroupDetailPage({ groupId, onNavigate, theme }: GroupDetailPageProps) {
+export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGroup, leaveGroup, currentUserId }: GroupDetailPageProps) {
+  const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [showRemoveMemberModal, setShowRemoveMemberModal] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<any>(null);
   const isDark = theme === 'dark';
-  const { user: currentUser } = useAuth();
-  const [group, setGroup] = useState<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; phone: string | null; status: 'joined' }[]; pendingInvites: { id: string; phone: string; token: string; createdAt: string; status: 'invited' }[]; cardLastFour: string | null } | null>(null);
-  const [resendingInvite, setResendingInvite] = useState<string | null>(null);
-  const [receipts, setReceipts] = useState<GroupReceipt[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-  const [inviteQr, setInviteQr] = useState<string | null>(null);
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteError, setInviteError] = useState('');
-  const [copyDone, setCopyDone] = useState(false);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
-  const [leaveConfirm, setLeaveConfirm] = useState(false);
-  const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([api.groups.get(groupId), api.receipts.list(groupId)])
-      .then(([groupData, receiptData]) => {
-        setGroup(groupData);
-        setReceipts(receiptData);
-      })
-      .catch((err) => {
-        setGroup(null);
-        setReceipts([]);
-        setError(err instanceof Error ? err.message : 'Failed to load group');
-      })
-      .finally(() => setLoading(false));
-  }, [groupId]);
+  // Find current group from groups array
+  const currentGroup = groups.find(g => g.id === groupId);
+  const isCreator = currentGroup?.createdBy === currentUserId;
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const isCreator = group && currentUser && group.created_by === currentUser.id;
-
-  const handleOpenInvite = useCallback(() => {
-    setInviteOpen(true);
-    setInviteLink(null);
-    setInviteQr(null);
-    setInviteError('');
-    setInviteLoading(true);
-    api.groups
-      .createInvite(groupId)
-      .then(({ inviteLink: link }) => {
-        setInviteLink(link);
-        QRCode.toDataURL(link, { width: 200, margin: 2 }).then(setInviteQr).catch(() => setInviteQr(null));
-      })
-      .catch((err) => {
-        setInviteError(err instanceof Error ? err.message : 'Failed to create invite link');
-      })
-      .finally(() => setInviteLoading(false));
-  }, [groupId]);
-
-  const handleCopyLink = useCallback(() => {
-    if (!inviteLink) return;
-    navigator.clipboard.writeText(inviteLink).then(() => {
-      setCopyDone(true);
-      setTimeout(() => setCopyDone(false), 2000);
-    });
-  }, [inviteLink]);
-
-  const handleDeleteGroup = useCallback(() => {
-    if (!groupId) return;
-    setActionLoading(true);
-    api.groups
-      .delete(groupId)
-      .then(() => onNavigate('groups'))
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to delete group');
-      })
-      .finally(() => {
-        setActionLoading(false);
-        setDeleteConfirm(false);
-      });
-  }, [groupId, onNavigate]);
-
-  const handleResendPhoneInvite = useCallback(async (inviteId: string) => {
-    if (!group) return;
-    setResendingInvite(inviteId);
-    try {
-      await api.groups.resendPhoneInvite(group.id, inviteId);
-      load();
-    } catch (err) {
-      setInviteError(err instanceof Error ? err.message : 'Failed to resend invite');
-    } finally {
-      setResendingInvite(null);
-    }
-  }, [group, load]);
-
-  const handleRemovePhoneInvite = useCallback(async (inviteId: string) => {
-    if (!group) return;
-    setActionLoading(true);
-    try {
-      await api.groups.removePhoneInvite(group.id, inviteId);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove invite');
-    } finally {
-      setActionLoading(false);
-    }
-  }, [group, load]);
-
-  const normalizePhoneDisplay = (phone: string) => {
-    const d = phone.replace(/\D/g, '');
-    if (d.length === 11 && d.startsWith('1')) {
-      const rest = d.slice(1);
-      return `(${rest.slice(0, 3)}) ${rest.slice(3, 6)}-${rest.slice(6)}`;
-    }
-    if (d.length === 10) {
-      return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
-    }
-    return phone;
+  // Mock data - would come from props/state in real app
+  const groupDataBase = {
+    1: { 
+      id: 1, 
+      name: 'Lunch Squad', 
+      members: [
+        { id: 1, name: 'You', balance: 15.50, avatar: '👤', isYou: true },
+        { id: 2, name: 'Sarah Mitchell', balance: -12.20, avatar: '👩', isYou: false },
+        { id: 3, name: 'Mike Johnson', balance: 18.10, avatar: '👨', isYou: false },
+        { id: 4, name: 'Emma Davis', balance: -21.40, avatar: '👧', isYou: false },
+      ],
+      balance: 45.80,
+      yourBalance: 15.50,
+      transactions: [
+        { id: 1, description: 'Pizza Palace', amount: 45.80, date: '2h ago', type: 'expense', receipts: 3 },
+        { id: 2, description: 'Coffee Shop', amount: 18.20, date: '1d ago', type: 'expense', receipts: 2 },
+        { id: 3, description: 'Sarah paid you', amount: 12.20, date: '2d ago', type: 'payment', receipts: 0 },
+      ]
+    },
+    2: { 
+      id: 2, 
+      name: 'Roommates',
+      members: [
+        { id: 1, name: 'You', balance: 50.00, avatar: '👤', isYou: true },
+        { id: 2, name: 'Alex', balance: -25.00, avatar: '👨', isYou: false },
+        { id: 3, name: 'Jordan', balance: -25.00, avatar: '👩', isYou: false },
+      ],
+      balance: 120.00,
+      yourBalance: 50.00,
+      transactions: [
+        { id: 1, description: 'Groceries', amount: 120.00, date: '1d ago', type: 'expense', receipts: 5 },
+      ]
+    },
+    3: { 
+      id: 3, 
+      name: 'Road Trip 2026',
+      members: [
+        { id: 1, name: 'You', balance: 0, avatar: '👤', isYou: true },
+        { id: 2, name: 'James', balance: 0, avatar: '👨', isYou: false },
+        { id: 3, name: 'Lisa', balance: 0, avatar: '👩', isYou: false },
+        { id: 4, name: 'David', balance: 0, avatar: '👨', isYou: false },
+        { id: 5, name: 'Emily', balance: 0, avatar: '👧', isYou: false },
+        { id: 6, name: 'Chris', balance: 0, avatar: '👦', isYou: false },
+      ],
+      balance: 0,
+      yourBalance: 0,
+      transactions: []
+    },
+    4: { 
+      id: 4, 
+      name: 'Office Lunch',
+      members: [
+        { id: 1, name: 'You', balance: 25.00, avatar: '👤', isYou: true },
+        { id: 2, name: 'Tom', balance: -12.50, avatar: '👨', isYou: false },
+        { id: 3, name: 'Rachel', balance: 30.00, avatar: '👩', isYou: false },
+        { id: 4, name: 'Steve', balance: -18.00, avatar: '👨', isYou: false },
+        { id: 5, name: 'Megan', balance: -24.50, avatar: '👧', isYou: false },
+      ],
+      balance: 67.50,
+      yourBalance: 25.00,
+      transactions: [
+        { id: 1, description: 'Sushi Restaurant', amount: 67.50, date: '3h ago', type: 'expense', receipts: 2 },
+        { id: 2, description: 'Coffee & Bagels', amount: 28.00, date: '2d ago', type: 'expense', receipts: 1 },
+      ]
+    },
   };
 
-  const handleLeaveGroup = useCallback(() => {
-    if (!groupId) return;
-    setActionLoading(true);
-    api.groups
-      .leave(groupId)
-      .then(() => onNavigate('groups'))
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to leave');
-      })
-      .finally(() => {
-        setActionLoading(false);
-        setLeaveConfirm(false);
-      });
-  }, [groupId, onNavigate]);
+  // Track removed members
+  const [removedMembers, setRemovedMembers] = useState<number[]>([]);
 
-  const handleRemoveMember = useCallback(
-    (userId: string) => {
-      if (!groupId) return;
-      setActionLoading(true);
-      api.groups
-        .removeMember(groupId, userId)
-        .then(load)
-        .catch((err) => {
-          setError(err instanceof Error ? err.message : 'Failed to remove member');
-        })
-        .finally(() => {
-          setActionLoading(false);
-          setRemoveConfirm(null);
-        });
-    },
-    [groupId, load]
-  );
+  const baseGroup = groupDataBase[groupId as keyof typeof groupDataBase] || groupDataBase[1];
+  
+  // Filter out removed members
+  const group = {
+    ...baseGroup,
+    members: baseGroup.members.filter(m => !removedMembers.includes(m.id))
+  };
 
-  if (error) {
-    return (
-      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center px-6 ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
-        <p className={`text-center mb-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{error}</p>
-        <div className="flex gap-3">
-          <button
-            onClick={() => onNavigate('groups')}
-            className={`px-4 py-2 rounded-xl font-medium ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-800'}`}
-          >
-            Go back
-          </button>
-          <button
-            onClick={load}
-            className="px-4 py-2 rounded-xl font-medium bg-blue-500 text-white"
-          >
-            Retry
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const handleRemoveMember = (member: any) => {
+    setSelectedMember(member);
+    setShowRemoveMemberModal(true);
+    setShowMenu(false);
+  };
 
-  const showContent = !loading && group;
+  const confirmRemoveMember = () => {
+    if (selectedMember) {
+      setRemovedMembers([...removedMembers, selectedMember.id]);
+      setShowRemoveMemberModal(false);
+      setSelectedMember(null);
+    }
+  };
+
+  const handleDeleteGroup = () => {
+    // Mock implementation - in real app would delete from database
+    console.log('Deleting group:', groupId);
+    if (groupId) {
+      deleteGroup(groupId);
+    }
+    setShowDeleteModal(false);
+    // Navigate back to groups page
+    setTimeout(() => {
+      onNavigate('groups');
+    }, 100);
+  };
+
+  const handleLeaveGroup = () => {
+    // Mock implementation - in real app would remove user from group
+    console.log('Leaving group:', groupId);
+    if (groupId) {
+      leaveGroup(groupId);
+    }
+    setShowLeaveModal(false);
+    // Navigate back to groups page
+    setTimeout(() => {
+      onNavigate('groups');
+    }, 100);
+  };
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
-      <motion.div
+    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
+      {/* Header */}
+      <motion.div 
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}
+        className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white/80 border-slate-200'} backdrop-blur-xl border-b px-5 py-5`}
       >
-        <div className="flex items-center gap-3 mb-4">
-          <button
-            onClick={() => onNavigate('groups')}
-            className={`w-9 h-9 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center active:scale-95 transition-transform`}
-          >
-            <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-slate-800'} strokeWidth={2.5} />
-          </button>
-          <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>{group?.name ?? 'Group'}</h1>
-        </div>
-        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-          {group ? `${group.members.length} members` : '…'}
-        </p>
-      </motion.div>
-
-      {/* Invite modal: Copy link + QR code (no email) */}
-      {inviteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setInviteOpen(false)}>
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl shadow-xl max-w-sm w-full p-5`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-3`}>Invite to group</h3>
-            {inviteLoading && !inviteLink ? (
-              <div className="py-8 flex flex-col items-center gap-3">
-                <Loader size={32} className="animate-spin text-blue-500" />
-                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Creating invite link...</p>
-              </div>
-            ) : inviteError && !inviteLink ? (
-              <>
-                <p className={`text-sm text-red-500 mb-4`}>{inviteError}</p>
-                <button onClick={() => setInviteOpen(false)} className={`w-full py-2.5 rounded-xl font-medium ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-gray-200 text-slate-700'}`}>
-                  Close
-                </button>
-              </>
-            ) : inviteLink ? (
-              <>
-                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-3`}>Share this link or QR code — anyone with the link can join.</p>
-                <div className="flex items-center gap-2 mb-4">
-                  <input readOnly value={inviteLink} className={`flex-1 text-xs px-3 py-2.5 rounded-xl ${isDark ? 'bg-slate-700 text-slate-200' : 'bg-gray-100 text-slate-700'}`} />
-                  <button onClick={handleCopyLink} className={`flex-shrink-0 px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 ${copyDone ? 'bg-green-500 text-white' : 'bg-blue-500 text-white'}`}>
-                    <Copy size={18} />
-                    {copyDone ? 'Copied!' : 'Copy link'}
-                  </button>
-                </div>
-                {inviteQr && (
-                  <div className="flex justify-center my-4 p-3 bg-white rounded-xl">
-                    <img src={inviteQr} alt="QR code" className="w-44 h-44" />
-                  </div>
-                )}
-                <button onClick={() => setInviteOpen(false)} className="w-full py-3 rounded-xl font-medium bg-slate-200 text-slate-700">
-                  Done
-                </button>
-              </>
-            ) : null}
-          </motion.div>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto px-5 py-6 space-y-4">
-        {showContent ? (
-          <>
-        <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center">
-              <CreditCard size={20} className="text-white" />
-            </div>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => onNavigate('groups')}
+              className={`w-11 h-11 rounded-[16px] ${isDark ? 'bg-slate-700' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform shadow-sm`}
+            >
+              <ChevronLeft size={22} className={isDark ? 'text-white' : 'text-purple-600'} strokeWidth={2.5} />
+            </button>
             <div>
-              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Virtual Card</p>
-              <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                •••• •••• •••• {group!.cardLastFour || '----'}
-              </p>
+              <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{group.name}</h1>
+              <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{group.members.length} members</p>
             </div>
           </div>
-          <button
-            onClick={() => onNavigate('wallet')}
-            className="text-blue-500 text-sm font-medium"
-          >
-            View in Wallet
-          </button>
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide`}>
-              Members
-            </h2>
-            {isCreator && (
-              <button
-                onClick={handleOpenInvite}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-medium text-sm ${isDark ? 'bg-slate-700 hover:bg-slate-600 text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-              >
-                <UserPlus size={18} strokeWidth={2.5} />
-                Invite
-              </button>
+          <div className="relative">
+            <button 
+              onClick={() => setShowMenu(!showMenu)}
+              className={`w-11 h-11 rounded-[16px] ${isDark ? 'bg-slate-700' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform shadow-sm`}
+            >
+              <MoreVertical size={20} className={isDark ? 'text-white' : 'text-purple-600'} />
+            </button>
+            
+            {/* Dropdown Menu */}
+            {showMenu && (
+              <>
+                <div 
+                  className="fixed inset-0 z-10" 
+                  onClick={() => setShowMenu(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className={`absolute right-0 top-14 w-56 ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl shadow-2xl overflow-hidden z-20 border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
+                >
+                  <button 
+                    onClick={() => {
+                      setShowLeaveModal(true);
+                      setShowMenu(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-gray-50'} transition-colors border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}`}
+                  >
+                    <LogOut size={18} className="text-orange-500" />
+                    <span className={`text-sm font-medium text-orange-500`}>Leave Group</span>
+                  </button>
+                  {isCreator && (
+                    <button 
+                      onClick={() => {
+                        setShowDeleteModal(true);
+                        setShowMenu(false);
+                      }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-gray-50'} transition-colors`}
+                    >
+                      <Trash2 size={18} className="text-red-500" />
+                      <span className={`text-sm font-medium text-red-500`}>Delete Group</span>
+                    </button>
+                  )}
+                </motion.div>
+              </>
             )}
           </div>
-          <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
-            {group.members.map((m, i) => (
-              <div
-                key={m.id}
-                className={`flex items-center gap-3 p-4 ${i > 0 ? `border-t ${isDark ? 'border-slate-700' : 'border-gray-100'}` : ''}`}
+        </div>
+      </motion.div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        {/* Balance Card */}
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.1 }}
+          className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-6 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-6`}
+        >
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-2`}>Your Balance</p>
+          <p className={`text-4xl font-bold mb-1 ${group.yourBalance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+            {group.yourBalance >= 0 ? '+' : ''}${Math.abs(group.yourBalance).toFixed(2)}
+          </p>
+          <p className={`text-sm ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+            {group.yourBalance >= 0 ? 'You are owed' : 'You owe'}
+          </p>
+        </motion.div>
+
+        {/* Members Section */}
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="mb-6"
+        >
+          <h2 className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-3 px-1`}>
+            Members
+          </h2>
+          <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border overflow-hidden`}>
+            {group.members.map((member, index) => (
+              <div 
+                key={member.id}
+                className={`flex items-center justify-between p-4 ${
+                  index !== group.members.length - 1 ? `border-b ${isDark ? 'border-slate-700' : 'border-slate-100'}` : ''
+                }`}
               >
-                <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center`}>
-                  <Users size={18} className={isDark ? 'text-slate-400' : 'text-slate-600'} />
-                </div>
-                <div className="flex-1">
-                  <p className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                    {m.name}
-                    {m.id === group.created_by && (
-                      <span className={`ml-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>(creator)</span>
-                    )}
-                    <span className={`ml-2 text-xs px-2 py-0.5 rounded ${isDark ? 'bg-green-900/30 text-green-400' : 'bg-green-100 text-green-700'}`}>
-                      Joined
-                    </span>
-                  </p>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.email}</p>
-                </div>
-                {isCreator && m.id !== group.created_by && (
-                  <div>
-                    {removeConfirm === m.id ? (
-                      <div className="flex gap-1">
-                        <button onClick={() => setRemoveConfirm(null)} className="px-2 py-1 text-xs rounded bg-slate-200 text-slate-700">Cancel</button>
-                        <button onClick={() => handleRemoveMember(m.id)} disabled={actionLoading} className="px-2 py-1 text-xs rounded bg-red-500 text-white disabled:opacity-50">
-                          Remove
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={() => setRemoveConfirm(m.id)} className="p-2 rounded-lg text-red-500 hover:bg-red-50" title="Remove member">
-                        <Trash2 size={18} />
-                      </button>
-                    )}
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-400 to-indigo-600 flex items-center justify-center text-xl shadow-lg shadow-purple-200/40">
+                    {member.avatar}
                   </div>
-                )}
+                  <div>
+                    <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {member.name}
+                    </p>
+                    <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {member.balance >= 0 ? 'Owed' : 'Owes'} ${Math.abs(member.balance).toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <p className={`font-bold ${member.balance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                    {member.balance >= 0 ? '+' : ''}${member.balance.toFixed(2)}
+                  </p>
+                  {!member.isYou && (
+                    <button 
+                      onClick={() => handleRemoveMember(member)}
+                      className={`w-8 h-8 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center active:scale-95 transition-transform`}
+                    >
+                      <UserMinus size={16} className="text-red-500" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
-            {group.pendingInvites.map((invite, i) => (
-                <div
-                  key={invite.phone}
-                  className={`flex items-center gap-3 p-4 ${group.members.length > 0 || i > 0 ? `border-t ${isDark ? 'border-slate-700' : 'border-gray-100'}` : ''}`}
-                >
-                  <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-amber-900/30' : 'bg-amber-100'} flex items-center justify-center`}>
-                    <UserPlus size={18} className={isDark ? 'text-amber-400' : 'text-amber-600'} />
-                  </div>
-                  <div className="flex-1">
-                    <p className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                      {normalizePhoneDisplay(invite.phone)}
-                      <span className={`ml-2 text-xs px-2 py-0.5 rounded ${isDark ? 'bg-amber-900/30 text-amber-400' : 'bg-amber-100 text-amber-700'}`}>
-                        Invited
-                      </span>
-                    </p>
-                    <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Invite sent</p>
-                  </div>
-                  {isCreator && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handleResendPhoneInvite(invite.id)}
-                        disabled={resendingInvite === invite.id}
-                        className={`px-3 py-1.5 text-xs rounded font-medium ${isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'} disabled:opacity-50 flex items-center gap-1`}
-                      >
-                        {resendingInvite === invite.id ? <Loader size={14} className="animate-spin" /> : null}
-                        Resend
-                      </button>
-                      <button
-                        onClick={() => handleRemovePhoneInvite(invite.id)}
-                        disabled={actionLoading}
-                        className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 disabled:opacity-50"
-                        title="Remove invite"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+          </div>
+        </motion.div>
+
+        {/* Transaction History */}
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="mb-6"
+        >
+          <h2 className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-3 px-1`}>
+            Transaction History
+          </h2>
+          <div className="space-y-3">
+            {group.transactions.map((transaction, index) => (
+              <motion.div
+                key={transaction.id}
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: 0.4 + index * 0.1 }}
+                className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} rounded-[20px] p-4 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      transaction.type === 'expense' ? 'bg-red-100' : 'bg-green-100'
+                    }`}>
+                      <Receipt size={20} className={transaction.type === 'expense' ? 'text-red-500' : 'text-green-500'} />
                     </div>
-                  )}
+                    <div>
+                      <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {transaction.description}
+                      </p>
+                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {transaction.date}
+                      </p>
+                    </div>
+                  </div>
+                  <p className={`font-bold ${transaction.type === 'expense' ? 'text-red-500' : 'text-green-500'}`}>
+                    {transaction.type === 'expense' ? '-' : '+'}${transaction.amount.toFixed(2)}
+                  </p>
                 </div>
+                {transaction.receipts > 0 && (
+                  <div className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'} pl-13`}>
+                    {transaction.receipts} receipt{transaction.receipts > 1 ? 's' : ''} attached
+                  </div>
+                )}
+              </motion.div>
             ))}
           </div>
-        </div>
-
-        <div>
-          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-2`}>
-            Recent receipts
-          </h2>
-          {receipts.length === 0 ? (
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-6 text-center`}>
-              <Receipt size={28} className={`${isDark ? 'text-slate-500' : 'text-slate-300'} mx-auto mb-2`} />
-              <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'} text-sm`}>
-                No receipts yet. Upload one to start splitting.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {receipts.map((r) => (
-                <div
-                  key={r.id}
-                  className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm border ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                        {new Date(r.created_at).toLocaleDateString()} {new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.status === 'completed' ? 'Completed' : 'Pending'}</p>
-                    </div>
-                    <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                      ${r.total ? r.total.toFixed(2) : '—'}
-                    </p>
-                  </div>
-                  {r.splits.length > 0 && (
-                    <div className="space-y-1 mt-2">
-                      {r.splits.map((split) => (
-                        <div key={split.user_id} className="flex items-center justify-between text-sm">
-                          <span className={isDark ? 'text-slate-300' : 'text-slate-600'}>{split.name}</span>
-                          <span className="font-medium">${split.amount.toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <button
-                    onClick={() => onNavigate({ page: 'receiptItems', receiptId: r.id, groupId })}
-                    className="mt-3 text-sm text-blue-500 font-medium"
-                  >
-                    View / Edit split
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={() => onNavigate({ page: 'receiptScan', groupId })}
-          className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-xl font-semibold flex items-center justify-center gap-2"
-        >
-          <Upload size={22} strokeWidth={2.5} />
-          Upload Receipt
-        </button>
-
-        {/* Delete group / Leave group */}
-        <div className="pt-4 space-y-2">
-          {isCreator ? (
-            <>
-              {deleteConfirm ? (
-                <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 border border-red-200`}>
-                  <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'} mb-3`}>Delete this group? This cannot be undone. All receipts and data will be removed.</p>
-                  <div className="flex gap-2">
-                    <button onClick={() => setDeleteConfirm(false)} className={`flex-1 py-2.5 rounded-xl font-medium ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-gray-200 text-slate-700'}`}>
-                      Cancel
-                    </button>
-                    <button 
-                      onClick={handleDeleteGroup} 
-                      disabled={actionLoading} 
-                      className={`flex-1 py-2.5 rounded-xl font-medium flex items-center justify-center gap-2 ${
-                        actionLoading 
-                          ? 'bg-red-400 text-white opacity-75 cursor-wait' 
-                          : 'bg-red-500 text-white hover:bg-red-600 active:scale-95'
-                      } transition-colors`}
-                    >
-                      {actionLoading && <Loader size={18} className="animate-spin" />}
-                      <span>Delete</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => setDeleteConfirm(true)} className={`w-full py-3 rounded-xl font-medium text-red-500 ${isDark ? 'bg-slate-800 hover:bg-slate-700' : 'bg-white hover:bg-gray-50'} border border-red-200`}>
-                  Delete group
-                </button>
-              )}
-            </>
-          ) : (
-            <>
-              {leaveConfirm ? (
-                <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 border border-amber-200`}>
-                  <p className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-600'} mb-3`}>Leave this group? You will lose access to its receipts and card.</p>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={() => setLeaveConfirm(false)} 
-                      className={`flex-1 py-2.5 rounded-xl font-medium ${isDark ? 'bg-slate-700 text-slate-300 hover:bg-slate-600' : 'bg-gray-200 text-slate-700 hover:bg-gray-300'} transition-colors`}
-                    >
-                      <span>Cancel</span>
-                    </button>
-                    <button 
-                      onClick={handleLeaveGroup} 
-                      disabled={actionLoading} 
-                      className={`flex-1 py-2.5 rounded-xl font-semibold flex items-center justify-center gap-2 ${
-                        actionLoading 
-                          ? 'bg-amber-400 text-white cursor-wait opacity-75' 
-                          : 'bg-amber-500 text-white hover:bg-amber-600 active:scale-95'
-                      } transition-all`}
-                    >
-                      {actionLoading ? (
-                        <>
-                          <Loader size={18} className="animate-spin" />
-                          <span>Leaving...</span>
-                        </>
-                      ) : (
-                        <span>Leave</span>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => setLeaveConfirm(true)} className={`w-full py-3 rounded-xl font-medium flex items-center justify-center gap-2 ${isDark ? 'bg-slate-800 text-slate-300 hover:bg-slate-700' : 'bg-white text-slate-600 hover:bg-gray-50'} border ${isDark ? 'border-slate-600' : 'border-gray-200'}`}>
-                  <LogOut size={18} />
-                  Leave group
-                </button>
-              )}
-            </>
-          )}
-        </div>
-          </>
-        ) : (
-          <div className="flex-1 flex items-center justify-center py-12">
-            <Loader size={32} className="animate-spin text-blue-500" />
-          </div>
-        )}
+        </motion.div>
       </div>
+
+      {/* Add Receipt Button */}
+      <motion.div
+        initial={{ y: 20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.5 }}
+        className="px-5 pb-7"
+      >
+        <button 
+          onClick={() => onNavigate('receiptScan', groupId!)}
+          className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-400/50 active:scale-[0.98] transition-transform flex items-center justify-center gap-2.5 text-[17px]"
+        >
+          <Plus size={24} strokeWidth={2.5} />
+          Add Receipt
+        </button>
+      </motion.div>
+
+      {/* Delete Group Modal */}
+      {showDeleteModal && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/60 z-40"
+            onClick={() => setShowDeleteModal(false)}
+          />
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm"
+          >
+            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={24} className="text-red-500" />
+              </div>
+              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                Delete {group.name}?
+              </h3>
+              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                This action cannot be undone. All transaction history will be permanently deleted.
+              </p>
+              <div className="space-y-2">
+                <button 
+                  onClick={handleDeleteGroup}
+                  className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform"
+                >
+                  Yes, Delete Group
+                </button>
+                <button 
+                  onClick={() => setShowDeleteModal(false)}
+                  className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+
+      {/* Leave Group Modal */}
+      {showLeaveModal && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/60 z-40"
+            onClick={() => setShowLeaveModal(false)}
+          />
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm"
+          >
+            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+              <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center mx-auto mb-4">
+                <LogOut size={24} className="text-orange-500" />
+              </div>
+              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                Leave {group.name}?
+              </h3>
+              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                You'll no longer have access to this group's transactions and receipts.
+              </p>
+              <div className="space-y-2">
+                <button 
+                  onClick={handleLeaveGroup}
+                  className="w-full bg-orange-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform"
+                >
+                  Yes, Leave Group
+                </button>
+                <button 
+                  onClick={() => setShowLeaveModal(false)}
+                  className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+
+      {/* Remove Member Modal */}
+      {showRemoveMemberModal && selectedMember && (
+        <>
+          <div 
+            className="fixed inset-0 bg-black/60 z-40"
+            onClick={() => setShowRemoveMemberModal(false)}
+          />
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm"
+          >
+            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <UserMinus size={24} className="text-red-500" />
+              </div>
+              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                Remove {selectedMember.name}?
+              </h3>
+              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                They'll be removed from {group.name} and won't have access to the group anymore.
+              </p>
+              <div className="space-y-2">
+                <button 
+                  onClick={confirmRemoveMember}
+                  className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform"
+                >
+                  Yes, Remove Member
+                </button>
+                <button 
+                  onClick={() => setShowRemoveMemberModal(false)}
+                  className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
     </div>
   );
 }
