@@ -13,20 +13,27 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
   const isDark = theme === 'dark';
   const [groupName, setGroupName] = useState('');
   const [members, setMembers] = useState<string[]>([]);
-  const [emailInput, setEmailInput] = useState('');
+  const [phoneInput, setPhoneInput] = useState('');
   const [step, setStep] = useState<'create' | 'success'>('create');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const normalizePhoneDisplay = (p: string) => {
+    const d = p.replace(/\D/g, '');
+    if (d.length === 10) return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+    return p;
+  };
+
   const addMember = () => {
-    if (emailInput.trim() && !members.includes(emailInput.trim().toLowerCase())) {
-      setMembers([...members, emailInput.trim().toLowerCase()]);
-      setEmailInput('');
+    const raw = phoneInput.replace(/\D/g, '');
+    if (raw.length >= 10 && !members.some((m) => m.replace(/\D/g, '') === raw)) {
+      setMembers([...members, phoneInput.trim()]);
+      setPhoneInput('');
     }
   };
 
-  const removeMember = (email: string) => {
-    setMembers(members.filter(m => m !== email));
+  const removeMember = (phone: string) => {
+    setMembers(members.filter((m) => m !== phone));
   };
 
   const createGroup = async () => {
@@ -34,7 +41,8 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
     setError('');
     setLoading(true);
     try {
-      const group = await api.groups.create(groupName.trim(), members);
+      const group = await api.groups.create(groupName.trim(), members.length ? members : undefined);
+      // Show success with member statuses
       setStep('success');
       setTimeout(() => {
         onNavigate({ page: 'groupDetail', groupId: group.id });
@@ -127,7 +135,7 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
           />
         </motion.div>
 
-        {/* Add Members */}
+        {/* Add Members by Phone */}
         <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -139,11 +147,11 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
           </label>
           <div className="flex gap-2 mb-3">
             <input
-              type="email"
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && addMember()}
-              placeholder="Enter email address"
+              type="tel"
+              value={phoneInput}
+              onChange={(e) => setPhoneInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addMember())}
+              placeholder="Enter phone number"
               className={`flex-1 px-4 py-3.5 rounded-xl text-[17px] ${
                 isDark 
                   ? 'bg-slate-800 text-white border-slate-700' 
@@ -151,6 +159,7 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
               } border focus:outline-none focus:ring-2 focus:ring-blue-400`}
             />
             <button
+              type="button"
               onClick={addMember}
               className="w-12 h-12 bg-gradient-to-r from-slate-600 to-blue-500 rounded-xl flex items-center justify-center active:scale-95 transition-transform"
             >
@@ -158,20 +167,20 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
             </button>
           </div>
 
-          {/* Members List */}
           {members.length > 0 && (
             <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
-              {members.map((email, index) => (
-                <div 
-                  key={email}
+              {members.map((ph, index) => (
+                <div
+                  key={ph}
                   className={`flex items-center justify-between p-3 ${
                     index !== members.length - 1 ? `border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}` : ''
                   }`}
                 >
-                  <p className={`${isDark ? 'text-white' : 'text-slate-800'}`}>{email}</p>
+                  <p className={`${isDark ? 'text-white' : 'text-slate-800'}`}>{normalizePhoneDisplay(ph)}</p>
                   <button
-                    onClick={() => removeMember(email)}
-                    className="p-1 hover:bg-red-100 rounded-full transition-colors"
+                    type="button"
+                    onClick={() => removeMember(ph)}
+                    className={`p-1 rounded-full transition-colors ${isDark ? 'hover:bg-slate-700' : 'hover:bg-red-50'}`}
                   >
                     <X size={18} className="text-red-500" />
                   </button>
@@ -182,7 +191,6 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
         </motion.div>
 
         {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-        {/* Info Box */}
         <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
@@ -190,7 +198,7 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
           className={`${isDark ? 'bg-blue-900/30 border-blue-700' : 'bg-blue-50 border-blue-200'} border rounded-xl p-4`}
         >
           <p className={`text-sm ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>
-            💡 Members will receive an invitation to join this group. Once they accept, a virtual card will be generated for group payments.
+            💡 Add phone numbers of people who already have a Tabby account. They’ll be added directly to the group—no invite needed.
           </p>
         </motion.div>
       </div>

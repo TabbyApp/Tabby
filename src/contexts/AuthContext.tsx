@@ -1,13 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api, setAccessToken, clearTokens } from '../lib/api';
 
-type User = { id: string; email: string; name: string } | null;
+type User = { id: string; email: string; name: string; phone?: string } | null;
 
 type AuthContextValue = {
   user: User;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name: string) => Promise<void>;
+  loginWithPhone: (phone: string, code: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (u: User) => void;
 };
@@ -31,7 +32,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     api.users
       .me()
       .then((data) => {
-        setUserState({ id: data.id, email: data.email, name: data.name });
+        setUserState({
+          id: data.id,
+          email: data.email,
+          name: data.name,
+          phone: (data as { phone?: string }).phone,
+        });
       })
       .catch((err) => {
         const msg = err instanceof Error ? err.message : '';
@@ -65,6 +71,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const loginWithPhone = useCallback(async (phone: string, code: string, name?: string) => {
+    try {
+      const data = await api.auth.verifyOtp(phone, code, name);
+      setAccessToken(data.accessToken);
+      setUserState(data.user);
+    } catch (err) {
+      throw err instanceof Error ? err : new Error('Sign in failed');
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.auth.logout();
@@ -75,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, loginWithPhone, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

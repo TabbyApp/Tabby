@@ -15,23 +15,32 @@ import { CreateGroupPage } from './components/CreateGroupPage';
 import { ReceiptScanPage } from './components/ReceiptScanPage';
 import { ReceiptItemsPage } from './components/ReceiptItemsPage';
 import { ProcessingPaymentPage } from './components/ProcessingPaymentPage';
+import { InviteAcceptPage } from './components/InviteAcceptPage';
 import { useAuth } from './contexts/AuthContext';
 
 export type PageType = 'home' | 'groups' | 'groupDetail' | 'activity' | 'create' | 'account' | 'settings' |
-  'wallet' | 'cardDetails' | 'createGroup' | 'receiptScan' | 'receiptItems' | 'processing';
+  'wallet' | 'cardDetails' | 'createGroup' | 'receiptScan' | 'receiptItems' | 'processing' | 'inviteAccept';
 
 export type PageState = {
   page: PageType;
   groupId?: string;
   receiptId?: string;
   splits?: { user_id: string; amount: number; name: string }[];
+  inviteToken?: string;
 };
+
+function getInitialStateFromUrl(): PageState {
+  if (typeof window === 'undefined') return { page: 'home' };
+  const m = window.location.pathname.match(/^\/invite\/([^/]+)$/);
+  if (m) return { page: 'inviteAccept', inviteToken: m[1] };
+  return { page: 'home' };
+}
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const isAuthenticated = !!user;
-  const [pageState, setPageState] = useState<PageState>({ page: 'home' });
+  const [pageState, setPageState] = useState<PageState>(getInitialStateFromUrl);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
   const setCurrentPage = (pageOrState: PageType | PageState) => {
@@ -68,12 +77,21 @@ export default function App() {
         </div>
 
         {showSplash ? (
-          <SplashScreen onComplete={() => setShowSplash(false)} />
+          <SplashScreen
+            onComplete={() => setShowSplash(false)}
+            ready={!authLoading}
+          />
         ) : !isAuthenticated ? (
           <LoginSignup onAuthenticate={() => {}} />
+        ) : pageState.page === 'inviteAccept' && pageState.inviteToken ? (
+          <InviteAcceptPage
+            inviteToken={pageState.inviteToken}
+            onNavigate={setCurrentPage}
+            theme={theme}
+          />
         ) : (
           <>
-            {pageState.page === 'home' && <LandingPage onNavigate={setCurrentPage} theme={theme} />}
+            {pageState.page === 'home' && <LandingPage key="home" onNavigate={setCurrentPage} theme={theme} />}
             {pageState.page === 'groups' && <GroupsPage onNavigate={setCurrentPage} theme={theme} />}
             {pageState.page === 'groupDetail' && pageState.groupId && (
               <GroupDetailPage groupId={pageState.groupId} onNavigate={setCurrentPage} theme={theme} />
