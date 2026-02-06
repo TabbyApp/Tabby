@@ -71,7 +71,7 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
     try {
       const ocrPromise = extractReceiptItems(fullPath);
       const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Couldn\'t read the image. Please try again.')), 15_000)
+        setTimeout(() => reject(new Error('Couldn\'t read the image. Please try again.')), 35_000)
       );
       items = await Promise.race([ocrPromise, timeout]);
     } catch (ocrErr) {

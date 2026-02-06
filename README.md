@@ -32,4 +32,10 @@ New signups start with an empty account.
 
 ## OCR (receipt scanning)
 
-Receipt uploads run Tesseract.js OCR to auto-extract line items. Works best with clear photos of printed receipts. If OCR misses items, add them manually on the itemization screen.
+Receipt uploads use the [TabScanner](https://tabscanner.com/) API to extract line items. Set your API key in the server environment:
+
+```bash
+export TABSCANNER_API_KEY=your_api_key
+```
+
+Then run the server as above. Works best with clear photos of printed receipts. If OCR misses items, add them manually on the itemization screen.
