@@ -1,57 +1,102 @@
 import { motion } from 'motion/react';
-import { Users, Check, X, AlertCircle } from 'lucide-react';
-import { useState } from 'react';
+import { Users, Check, X, AlertCircle, Loader2 } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { PageType } from '../App';
+import { api } from '../lib/api';
 
 interface AcceptInvitePageProps {
-  onNavigate: (page: PageType, groupId?: number) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
-  inviteCode?: string;
+  inviteToken: string;
+  onAcceptSuccess?: (groupId: string) => void;
+  onDeclineSuccess?: () => void;
 }
 
-export function AcceptInvitePage({ onNavigate, theme, inviteCode }: AcceptInvitePageProps) {
+export function AcceptInvitePage({ onNavigate, theme, inviteToken, onAcceptSuccess, onDeclineSuccess }: AcceptInvitePageProps) {
   const isDark = theme === 'dark';
   const [isAccepting, setIsAccepting] = useState(false);
   const [isDeclining, setIsDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invite, setInvite] = useState<{
+    groupName: string;
+    inviterName: string;
+    inviterAvatar: string;
+    members: number;
+    recentActivity: string;
+    color: string;
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Mock invite data - would be fetched from API based on inviteCode
-  const invite = {
-    groupName: 'Weekend Brunch Club',
-    inviterName: 'Sarah Mitchell',
-    inviterAvatar: '👩',
-    members: 5,
-    recentActivity: 'Last expense: Coffee Shop - $23.50',
-    color: '#F97316',
-  };
+  useEffect(() => {
+    setError(null);
+    setLoading(true);
+    api.invites
+      .getByToken(inviteToken)
+      .then((data) => {
+        setInvite({
+          groupName: data.groupName,
+          inviterName: data.inviterName,
+          inviterAvatar: '👩',
+          members: 0,
+          recentActivity: '',
+          color: '#F97316',
+        });
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Invite not found');
+        setInvite(null);
+      })
+      .finally(() => setLoading(false));
+  }, [inviteToken]);
 
   const handleAccept = async () => {
+    if (!inviteToken) return;
     setIsAccepting(true);
     setError(null);
-    
-    // Mock API call
-    setTimeout(() => {
-      // In real app: API call to accept invite
-      console.log('Accepting invite:', inviteCode);
+    try {
+      const group = await api.invites.accept(inviteToken);
+      onAcceptSuccess?.(group.id) ?? onNavigate('groupDetail', group.id);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Could not accept invite';
+      setError(msg);
+      if ((err as { code?: string })?.code === 'PAYMENT_METHOD_REQUIRED') {
+        onNavigate('account');
+      }
+    } finally {
       setIsAccepting(false);
-      // Navigate to the group after accepting
-      onNavigate('groupDetail', 1); // Would use actual group ID from API
-    }, 1500);
+    }
   };
 
   const handleDecline = async () => {
+    if (!inviteToken) return;
     setIsDeclining(true);
     setError(null);
-    
-    // Mock API call
-    setTimeout(() => {
-      // In real app: API call to decline invite
-      console.log('Declining invite:', inviteCode);
+    try {
+      await api.invites.decline(inviteToken);
+      onDeclineSuccess?.() ?? onNavigate('home');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not decline');
+    } finally {
       setIsDeclining(false);
-      // Navigate back to home
-      onNavigate('home');
-    }, 1000);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
+        <Loader2 className={`w-10 h-10 animate-spin ${isDark ? 'text-white' : 'text-slate-600'}`} />
+      </div>
+    );
+  }
+
+  if (!invite) {
+    return (
+      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center px-5 ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
+        <p className={isDark ? 'text-white' : 'text-slate-700'}>{error ?? 'Invite not found'}</p>
+        <button onClick={() => onNavigate('home')} className="mt-4 text-blue-500 underline">Back to Home</button>
+      </div>
+    );
+  }
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>

@@ -6,9 +6,9 @@ import { PageType } from '../App';
 interface ProcessingPaymentPageProps {
   onNavigate: (page: PageType, groupId?: number) => void;
   theme: 'light' | 'dark';
-  groupId: number | null;
+  groupId: string | null;
   accountType: 'standard' | 'pro';
-  deleteGroup: (groupId: number) => void;
+  deleteGroup: (groupId: string) => void;
   receiptData: {
     members: Array<{ id: number; name: string; amount: number; avatar: string }>;
     total: number;

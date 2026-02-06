@@ -6,13 +6,13 @@ import { TabbyCatLogo } from './TabbyCatLogo';
 import { PageType } from '../App';
 
 interface LandingPageProps {
-  onNavigate: (page: PageType, groupId?: number) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
-  groups: Array<{ id: number; name: string; members: number; balance: number; color: string; createdBy: number }>;
+  groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
   unreadNotificationCount: number;
-  pendingInvites: Array<{ id: number; groupName: string; inviterName: string; members: number }>;
-  acceptInvite: (inviteId: number) => void;
-  declineInvite: (inviteId: number) => void;
+  pendingInvites: Array<{ id: string; token: string; groupName: string; inviterName: string; members: number }>;
+  acceptInvite: (token: string) => void;
+  declineInvite: (token: string) => void;
 }
 
 export function LandingPage({ onNavigate, theme, groups, unreadNotificationCount, pendingInvites, acceptInvite, declineInvite }: LandingPageProps) {
@@ -185,13 +185,13 @@ export function LandingPage({ onNavigate, theme, groups, unreadNotificationCount
                   </div>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => acceptInvite(invite.id)}
+                      onClick={() => acceptInvite(invite.token)}
                       className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform"
                     >
                       Accept
                     </button>
                     <button
-                      onClick={() => declineInvite(invite.id)}
+                      onClick={() => declineInvite(invite.token)}
                       className={`flex-1 ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}
                     >
                       Decline

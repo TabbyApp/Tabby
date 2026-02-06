@@ -4,13 +4,13 @@ import { useState } from 'react';
 import { PageType } from '../App';
 
 interface GroupDetailPageProps {
-  onNavigate: (page: PageType, groupId?: number) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
-  groupId: number | null;
-  groups: Array<{ id: number; name: string; members: number; balance: number; color: string; createdBy: number }>;
-  deleteGroup: (groupId: number) => void;
-  leaveGroup: (groupId: number) => void;
-  currentUserId: number;
+  groupId: string | null;
+  groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
+  deleteGroup: (groupId: string) => void;
+  leaveGroup: (groupId: string) => void;
+  currentUserId: string;
 }
 
 export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGroup, leaveGroup, currentUserId }: GroupDetailPageProps) {
@@ -27,8 +27,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
 
   // Mock data - would come from props/state in real app
   const groupDataBase = {
-    1: { 
-      id: 1, 
+    1: {
+      id: 1,
       name: 'Lunch Squad', 
       members: [
         { id: 1, name: 'You', balance: 15.50, avatar: '👤', isYou: true },
@@ -95,7 +95,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   // Track removed members
   const [removedMembers, setRemovedMembers] = useState<number[]>([]);
 
-  const baseGroup = groupDataBase[groupId as keyof typeof groupDataBase] || groupDataBase[1];
+  // Use mock data when available; for API string ids use fallback (first mock group)
+  const baseGroup = (groupId && (groupDataBase as Record<string, typeof groupDataBase[1]>)[String(groupId)]) ?? groupDataBase[1];
   
   // Filter out removed members
   const group = {

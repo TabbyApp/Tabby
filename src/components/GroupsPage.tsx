@@ -4,14 +4,14 @@ import { useState } from 'react';
 import { PageType } from '../App';
 
 interface GroupsPageProps {
-  onNavigate: (page: PageType, groupId?: number) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
-  groups: Array<{ id: number; name: string; members: number; balance: number; color: string; createdBy: number }>;
-  recentGroups: Array<{ id: number; name: string; members: number; balance: number; color: string; createdBy: number; deletedAt: Date }>;
+  groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
+  recentGroups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string; deletedAt: Date }>;
   accountType: 'standard' | 'pro';
-  deleteGroup: (groupId: number) => void;
-  leaveGroup: (groupId: number) => void;
-  currentUserId: number;
+  deleteGroup: (groupId: string) => void;
+  leaveGroup: (groupId: string) => void;
+  currentUserId: string;
 }
 
 export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountType }: GroupsPageProps) {

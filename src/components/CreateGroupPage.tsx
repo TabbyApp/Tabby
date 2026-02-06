@@ -4,9 +4,9 @@ import { useState } from 'react';
 import { PageType } from '../App';
 
 interface CreateGroupPageProps {
-  onNavigate: (page: PageType, groupId?: number) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
-  addGroup: (name: string, memberEmails: string[]) => number;
+  addGroup: (name: string, memberEmails: string[]) => Promise<string>;
 }
 
 export function CreateGroupPage({ onNavigate, theme, addGroup }: CreateGroupPageProps) {
@@ -28,15 +28,15 @@ export function CreateGroupPage({ onNavigate, theme, addGroup }: CreateGroupPage
     setMembers(members.filter(m => m !== email));
   };
 
-  const createGroup = () => {
+  const createGroup = async () => {
     if (groupName.trim()) {
-      // Add group to app state
-      const newGroupId = addGroup(groupName, members);
-      
-      // Generate unique link when creating group
-      const linkId = Math.random().toString(36).substring(2, 9);
-      setGroupLink(`https://tabby.app/join/${linkId}`);
-      setStep('success');
+      try {
+        const newGroupId = await addGroup(groupName, members);
+        setGroupLink(`${typeof window !== 'undefined' ? window.location.origin : ''}/?invite=...`);
+        setStep('success');
+      } catch (_) {
+        // Error handled by App / API
+      }
     }
   };
 

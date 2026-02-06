@@ -3,7 +3,7 @@ const TOKEN_KEY = 'tabby_access_token';
 
 const DASHBOARD_CACHE_TTL_MS = 25_000; // 25s – instant when navigating back to home
 type DashboardData = {
-  groups: { id: string; name: string; memberCount: number; cardLastFour: string | null; createdAt?: string }[];
+  groups: { id: string; name: string; memberCount: number; cardLastFour: string | null; createdAt?: string; createdBy?: string }[];
   virtualCards: { groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[];
   pendingInvites: { inviteId: string; token: string; groupName: string; inviterName: string; createdAt: string }[];
 };

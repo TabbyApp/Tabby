@@ -105,6 +105,7 @@ usersRouter.get('/me/dashboard', requireAuth, (req, res) => {
       memberCount: g.member_count,
       cardLastFour: g.card_number_last_four,
       createdAt: g.created_at,
+      createdBy: g.created_by,
     })),
     virtualCards: cards.map((c) => ({ ...c, active: true, groupTotal: c.groupTotal ?? 0 })),
     pendingInvites: invites,

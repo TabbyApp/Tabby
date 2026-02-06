@@ -1,21 +1,42 @@
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import { TabbyCatLogo } from './TabbyCatLogo';
+import { useAuth } from '../contexts/AuthContext';
 
 interface LoginSignupProps {
-  onAuthenticate: () => void;
+  onAuthenticate?: () => void;
   onForgotPassword: () => void;
 }
 
 export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupProps) {
+  const { login, signup } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onAuthenticate();
+    setError(null);
+    setSubmitting(true);
+    try {
+      if (isLogin) {
+        await login(email.trim(), password);
+      } else {
+        if (!name.trim()) {
+          setError('Name is required');
+          return;
+        }
+        await signup(email.trim(), password, name.trim());
+      }
+      onAuthenticate?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -100,6 +121,10 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
           </div>
         </div>
 
+        {error && (
+          <p className="mb-3 text-sm text-red-600">{error}</p>
+        )}
+
         {isLogin && (
           <div className="mb-6 text-right">
             <button 
@@ -115,9 +140,10 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
         <div className="mt-auto space-y-3">
           <button
             type="submit"
-            className="w-full bg-gradient-to-r from-slate-600 to-blue-500 text-white py-3.5 rounded-xl text-[17px] font-semibold shadow-lg active:scale-[0.98] transition-transform"
+            disabled={submitting}
+            className="w-full bg-gradient-to-r from-slate-600 to-blue-500 text-white py-3.5 rounded-xl text-[17px] font-semibold shadow-lg active:scale-[0.98] transition-transform disabled:opacity-70"
           >
-            {isLogin ? 'Log In' : 'Sign Up'}
+            {submitting ? 'Please wait...' : isLogin ? 'Log In' : 'Sign Up'}
           </button>
 
           <button

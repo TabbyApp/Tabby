@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from './contexts/AuthContext';
+import { api, invalidateDashboardCache } from './lib/api';
 import { SplashScreen } from './components/SplashScreen';
 import { LoginSignup } from './components/LoginSignup';
 import { LandingPage } from './components/LandingPage';
@@ -29,137 +31,135 @@ export type PageType = 'home' | 'groups' | 'activity' | 'account' | 'settings' |
   'groupDetail' | 'notifications' | 'notificationsSettings' | 'privacySettings' | 'helpSupport' | 
   'appearanceSettings' | 'changePassword' | 'twoFactorAuth' | 'forgotPassword' | 'acceptInvite' | 'proAccount';
 
+const GROUP_COLORS = ['#3B82F6', '#A855F7', '#22C55E', '#F97316', '#EC4899'];
+
+function mapDashboardToGroups(dashboard: { groups: { id: string; name: string; memberCount: number; cardLastFour: string | null; createdAt?: string; createdBy?: string }[] }) {
+  return dashboard.groups.map((g, i) => ({
+    id: g.id,
+    name: g.name,
+    members: g.memberCount,
+    balance: 0,
+    color: GROUP_COLORS[i % GROUP_COLORS.length],
+    createdBy: g.createdBy ?? '',
+  }));
+}
+
 export default function App() {
+  const { user, loading: authLoading, login, signup, logout } = useAuth();
+  const isAuthenticated = !!user;
+  const currentUserId = user?.id ?? '';
+
   const [showSplash, setShowSplash] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [currentPage, setCurrentPage] = useState<PageType>('home');
   const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
-  const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [acceptInviteToken, setAcceptInviteToken] = useState<string | null>(null);
   const [pageHistory, setPageHistory] = useState<PageType[]>([]);
-  
-  // Track account type
   const [accountType, setAccountType] = useState<'standard' | 'pro'>('standard');
-  
-  // Track active receipt processing group
-  const [processingGroupId, setProcessingGroupId] = useState<number | null>(null);
-  
-  // Track receipt data for payment processing
+  const [processingGroupId, setProcessingGroupId] = useState<string | null>(null);
   const [receiptData, setReceiptData] = useState<{
     members: Array<{ id: number; name: string; amount: number; avatar: string }>;
     total: number;
   } | null>(null);
-  
-  // Track groups and memberships
-  const [groups, setGroups] = useState([
-    { id: 1, name: 'Lunch Squad', members: 4, balance: 45.80, color: '#3B82F6', createdBy: 1 }, // Blue
-    { id: 2, name: 'Roommates', members: 3, balance: 120.00, color: '#A855F7', createdBy: 1 }, // Purple
-    { id: 3, name: 'Road Trip 2026', members: 6, balance: 0, color: '#22C55E', createdBy: 2 }, // Green
-    { id: 4, name: 'Office Lunch', members: 5, balance: 67.50, color: '#F97316', createdBy: 1 }, // Orange
-  ]);
 
-  // Track recent (deleted) groups
-  const [recentGroups, setRecentGroups] = useState<Array<{ 
-    id: number; 
-    name: string; 
-    members: number; 
-    balance: number; 
-    color: string; 
-    createdBy: number;
-    deletedAt: Date;
-  }>>([]);
-  
-  const currentUserId = 1; // Mock current user ID
+  // Groups and pending invites from API
+  const [groups, setGroups] = useState<Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>>([]);
+  const [pendingInvites, setPendingInvites] = useState<Array<{ id: string; token: string; groupName: string; inviterName: string; members: number }>>([]);
+  const [recentGroups, setRecentGroups] = useState<Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string; deletedAt: Date }>>([]);
 
-  // Track notifications
-  const [notifications, setNotifications] = useState([
-    { 
-      id: 1, 
-      type: 'invite', 
-      title: 'Group Invitation', 
-      message: 'Sarah Mitchell invited you to Weekend Brunch Club',
-      time: '5m ago',
-      read: false,
-    },
-    { 
-      id: 2, 
-      type: 'receipt', 
-      title: 'New Receipt', 
-      message: 'Mike added a receipt to Lunch Squad for $45.80',
-      time: '2h ago',
-      read: false,
-    },
-    { 
-      id: 3, 
-      type: 'payment', 
-      title: 'Payment Processed', 
-      message: 'Your payment of $15.50 to Lunch Squad was successful',
-      time: '1d ago',
-      read: true,
-    },
-    { 
-      id: 4, 
-      type: 'group', 
-      title: 'Group Update', 
-      message: 'Emma Davis joined Office Lunch',
-      time: '2d ago',
-      read: true,
-    },
-  ]);
+  const loadDashboard = useCallback(() => {
+    if (!user) return;
+    api.users.dashboard({ revalidate: true }).then((data) => {
+      setGroups(mapDashboardToGroups(data));
+      setPendingInvites(
+        data.pendingInvites.map((inv) => ({
+          id: inv.inviteId,
+          token: inv.token,
+          groupName: inv.groupName,
+          inviterName: inv.inviterName,
+          members: 0,
+        }))
+      );
+    }).catch(() => {});
+  }, [user]);
 
-  // Track pending invites
-  const [pendingInvites, setPendingInvites] = useState([
-    { id: 1, groupName: 'Weekend Brunch Club', inviterName: 'Sarah Mitchell', members: 5 },
-    { id: 2, groupName: 'Gym Buddies', inviterName: 'Mike Johnson', members: 3 },
-  ]);
-
-  const acceptInvite = (inviteId: number) => {
-    const invite = pendingInvites.find(inv => inv.id === inviteId);
-    if (invite) {
-      // Add the group to groups array
-      const newGroup = {
-        id: Math.max(...groups.map(g => g.id), 0) + 1,
-        name: invite.groupName,
-        members: invite.members,
-        balance: 0,
-        color: ['#3B82F6', '#A855F7', '#22C55E', '#F97316', '#EC4899'][Math.floor(Math.random() * 5)],
-        createdBy: 2, // Not created by current user
-      };
-      setGroups([...groups, newGroup]);
-      // Remove from pending invites
-      setPendingInvites(pendingInvites.filter(inv => inv.id !== inviteId));
+  useEffect(() => {
+    if (!user) {
+      setGroups([]);
+      setPendingInvites([]);
+      return;
     }
+    loadDashboard();
+  }, [user, loadDashboard]);
+
+  // Open accept-invite from URL (?invite=TOKEN or #invite/TOKEN)
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromQuery = params.get('invite') || params.get('token');
+    const hash = window.location.hash.slice(1);
+    const tokenFromHash = hash.startsWith('invite/') ? hash.replace('invite/', '') : null;
+    const token = tokenFromQuery || tokenFromHash;
+    if (token) {
+      setAcceptInviteToken(token);
+      setCurrentPage('acceptInvite');
+    }
+  }, [user]);
+
+  const [notifications, setNotifications] = useState([
+    { id: 1, type: 'invite', title: 'Group Invitation', message: 'Sarah Mitchell invited you to Weekend Brunch Club', time: '5m ago', read: false },
+    { id: 2, type: 'receipt', title: 'New Receipt', message: 'Mike added a receipt to Lunch Squad for $45.80', time: '2h ago', read: false },
+    { id: 3, type: 'payment', title: 'Payment Processed', message: 'Your payment of $15.50 to Lunch Squad was successful', time: '1d ago', read: true },
+    { id: 4, type: 'group', title: 'Group Update', message: 'Emma Davis joined Office Lunch', time: '2d ago', read: true },
+  ]);
+
+  const acceptInvite = (token: string) => {
+    setAcceptInviteToken(token);
+    setCurrentPage('acceptInvite');
   };
 
-  const declineInvite = (inviteId: number) => {
-    setPendingInvites(pendingInvites.filter(inv => inv.id !== inviteId));
+  const declineInviteByToken = (token: string) => {
+    api.invites.decline(token).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {});
   };
 
   const unreadNotificationCount = notifications.filter(n => !n.read).length;
 
-  const deleteGroup = (groupId: number) => {
+  const deleteGroup = (groupId: string) => {
     const groupToDelete = groups.find(g => g.id === groupId);
     if (groupToDelete) {
       setRecentGroups(prev => [...prev, { ...groupToDelete, deletedAt: new Date() }]);
     }
     setGroups(prev => prev.filter(g => g.id !== groupId));
+    api.groups.delete(groupId).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {
+      loadDashboard(); // Revert UI on failure
+    });
   };
 
-  const leaveGroup = (groupId: number) => {
+  const leaveGroup = (groupId: string) => {
     setGroups(prev => prev.filter(g => g.id !== groupId));
+    api.groups.leave(groupId).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {
+      loadDashboard(); // Revert UI on failure
+    });
   };
 
-  const addGroup = (name: string, memberEmails: string[]) => {
-    const newGroup = {
-      id: Math.max(...groups.map(g => g.id), 0) + 1,
-      name,
-      members: memberEmails.length + 1, // +1 for the creator
-      balance: 0,
-      color: ['#3B82F6', '#A855F7', '#22C55E', '#F97316'][Math.floor(Math.random() * 4)],
-      createdBy: currentUserId,
-    };
-    setGroups(prev => [...prev, newGroup]);
-    return newGroup.id;
+  const addGroup = async (name: string, memberEmails: string[]): Promise<string> => {
+    const group = await api.groups.create(name, []);
+    await Promise.all(
+      memberEmails.filter((e) => e.trim()).map((email) => api.groups.createInvite(group.id, email.trim().toLowerCase()).catch(() => {}))
+    );
+    invalidateDashboardCache();
+    loadDashboard();
+    return group.id;
   };
 
   // Determine actual theme based on preference
@@ -167,14 +167,14 @@ export default function App() {
     ? 'light' // In real app, this would check window.matchMedia('(prefers-color-scheme: dark)').matches
     : themePreference;
 
-  const handleNavigate = (page: PageType, groupId?: number) => {
+  const handleNavigate = (page: PageType, groupId?: string | number) => {
     setPageHistory(prev => [...prev, currentPage]);
     setCurrentPage(page);
-    if (groupId !== undefined) {
-      setSelectedGroupId(groupId);
-      // If navigating to receipt scan, track which group is being processed
+    const id = groupId !== undefined ? String(groupId) : null;
+    if (id !== null) {
+      setSelectedGroupId(id);
       if (page === 'receiptScan') {
-        setProcessingGroupId(groupId);
+        setProcessingGroupId(id);
       }
     }
   };
@@ -183,17 +183,13 @@ export default function App() {
     setThemePreference(newTheme);
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
+  const handleLogout = async () => {
+    await logout();
     setCurrentPage('home');
     setPageHistory([]);
-    // Reset groups on logout
-    setGroups([
-      { id: 1, name: 'Lunch Squad', members: 4, balance: 45.80, color: '#3B82F6', createdBy: 1 },
-      { id: 2, name: 'Roommates', members: 3, balance: 120.00, color: '#A855F7', createdBy: 1 },
-      { id: 3, name: 'Road Trip 2026', members: 6, balance: 0, color: '#22C55E', createdBy: 2 },
-      { id: 4, name: 'Office Lunch', members: 5, balance: 67.50, color: '#F97316', createdBy: 1 },
-    ]);
+    setGroups([]);
+    setPendingInvites([]);
+    setAcceptInviteToken(null);
   };
 
   const handleUpgradeToPro = (duration: '1week' | '1month' | '6months' | '1year') => {
@@ -227,10 +223,14 @@ export default function App() {
 
         {showSplash ? (
           <SplashScreen onComplete={() => setShowSplash(false)} />
+        ) : authLoading ? (
+          <div className="flex items-center justify-center h-[calc(100vh-48px-24px)]">
+            <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          </div>
         ) : showForgotPassword ? (
           <ForgotPasswordPage onNavigate={handleNavigate} onBack={() => setShowForgotPassword(false)} theme={theme} />
         ) : !isAuthenticated ? (
-          <LoginSignup onAuthenticate={() => setIsAuthenticated(true)} onForgotPassword={() => setShowForgotPassword(true)} />
+          <LoginSignup onForgotPassword={() => setShowForgotPassword(true)} />
         ) : (
           <>
             {currentPage === 'home' && <LandingPage 
@@ -240,7 +240,7 @@ export default function App() {
               unreadNotificationCount={unreadNotificationCount}
               pendingInvites={pendingInvites}
               acceptInvite={acceptInvite}
-              declineInvite={declineInvite}
+              declineInvite={declineInviteByToken}
             />}
             {currentPage === 'groups' && <GroupsPage 
               onNavigate={handleNavigate} 
@@ -286,7 +286,25 @@ export default function App() {
             {currentPage === 'appearanceSettings' && <AppearanceSettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} themePreference={themePreference} />}
             {currentPage === 'changePassword' && <ChangePasswordPage onNavigate={handleNavigate} theme={theme} />}
             {currentPage === 'twoFactorAuth' && <TwoFactorAuthPage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'acceptInvite' && <AcceptInvitePage onNavigate={handleNavigate} theme={theme} />}
+            {currentPage === 'acceptInvite' && acceptInviteToken && (
+              <AcceptInvitePage
+                onNavigate={handleNavigate}
+                theme={theme}
+                inviteToken={acceptInviteToken}
+                onAcceptSuccess={(groupId) => {
+                  setAcceptInviteToken(null);
+                  invalidateDashboardCache();
+                  loadDashboard();
+                  handleNavigate('groupDetail', groupId);
+                }}
+                onDeclineSuccess={() => {
+                  setAcceptInviteToken(null);
+                  invalidateDashboardCache();
+                  loadDashboard();
+                  handleNavigate('home');
+                }}
+              />
+            )}
             {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
           </>
         )}
