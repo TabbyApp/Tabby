@@ -79,7 +79,14 @@ export async function extractReceiptItems(imagePath: string): Promise<{ name: st
     body: form,
   });
 
-  const processJson = (await processRes.json()) as TabScannerProcessResponse;
+  const processBody = await processRes.text();
+  let processJson: TabScannerProcessResponse;
+  try {
+    processJson = JSON.parse(processBody) as TabScannerProcessResponse;
+  } catch {
+    console.warn('TabScanner process non-JSON response:', processRes.status, processBody.slice(0, 200));
+    throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
+  }
 
   if (!processRes.ok) {
     console.warn('TabScanner process error:', processJson.code ?? processRes.status, processJson.message ?? processRes.status);
@@ -106,14 +113,25 @@ export async function extractReceiptItems(imagePath: string): Promise<{ name: st
   let last: TabScannerResultResponse = {};
 
   while (Date.now() - startedAt < MAX_POLL_MS) {
-    const resultRes = await fetch(`${TABSCANNER_RESULT_URL}?token=${encodeURIComponent(token)}`, {
+    const resultRes = await fetch(`${TABSCANNER_RESULT_URL}/${encodeURIComponent(token)}`, {
       method: 'GET',
       headers: {
         apikey: apiKey,
       },
     });
 
-    last = (await resultRes.json()) as TabScannerResultResponse;
+    const contentType = resultRes.headers.get('content-type') ?? '';
+    const body = await resultRes.text();
+    if (!contentType.includes('application/json')) {
+      console.warn('TabScanner result non-JSON response:', resultRes.status, body.slice(0, 200));
+      throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
+    }
+    try {
+      last = JSON.parse(body) as TabScannerResultResponse;
+    } catch {
+      console.warn('TabScanner result parse error:', body.slice(0, 200));
+      throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
+    }
 
     if (last.status === 'done' && last.result?.lineItems) {
       return mapLineItems(last.result.lineItems);
