@@ -54,7 +54,7 @@ plaidRouter.post('/link-token', requireAuth, async (req, res) => {
       products: ['auth'],
       country_codes: ['US'],
       language: 'en',
-    });
+    } as any);
     const linkToken = response.data.link_token;
     if (!linkToken) {
       return res.status(500).json({ error: 'Plaid did not return a link token' });
