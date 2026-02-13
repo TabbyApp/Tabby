@@ -105,7 +105,7 @@ authRouter.post('/refresh', (req, res) => {
 
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   const row = db.prepare(
-    'SELECT id FROM refresh_tokens WHERE token_hash = ? AND expires_at > datetime("now")'
+    "SELECT id FROM refresh_tokens WHERE token_hash = ? AND expires_at > datetime('now')"
   ).get(tokenHash) as { id: string } | undefined;
 
   if (!row) {

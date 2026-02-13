@@ -6,11 +6,12 @@ import type { PageType, PageState } from '../App';
 
 interface ReceiptScanPageProps {
   groupId?: string;
+  transactionId?: string;
   onNavigate: (target: PageType | PageState) => void;
   theme: 'light' | 'dark';
 }
 
-export function ReceiptScanPage({ groupId, onNavigate, theme }: ReceiptScanPageProps) {
+export function ReceiptScanPage({ groupId, transactionId, onNavigate, theme }: ReceiptScanPageProps) {
   const isDark = theme === 'dark';
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -35,11 +36,20 @@ export function ReceiptScanPage({ groupId, onNavigate, theme }: ReceiptScanPageP
     setError('');
     setUploading(true);
     try {
-      const receipt = await api.receipts.upload(groupId, file);
-      if (receipt?.id) {
-        onNavigate({ page: 'receiptItems', receiptId: receipt.id, groupId });
+      if (transactionId) {
+        const result = await api.transactions.uploadReceipt(transactionId, file);
+        if (result?.receipt_id) {
+          onNavigate({ page: 'receiptItems', receiptId: result.receipt_id, groupId, transactionId });
+        } else {
+          setError('Upload succeeded but got invalid response. Try again.');
+        }
       } else {
-        setError('Upload succeeded but got invalid response. Try again.');
+        const receipt = await api.receipts.upload(groupId, file);
+        if (receipt?.id) {
+          onNavigate({ page: 'receiptItems', receiptId: receipt.id, groupId });
+        } else {
+          setError('Upload succeeded but got invalid response. Try again.');
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Upload failed';
@@ -50,7 +60,7 @@ export function ReceiptScanPage({ groupId, onNavigate, theme }: ReceiptScanPageP
   };
 
   const handleTakePhoto = () => {
-    if (!groupId) {
+    if (!groupId && !transactionId) {
       setError('Open this from a group to upload receipts');
       return;
     }
@@ -58,12 +68,14 @@ export function ReceiptScanPage({ groupId, onNavigate, theme }: ReceiptScanPageP
   };
 
   const handleChooseGallery = () => {
-    if (!groupId) {
+    if (!groupId && !transactionId) {
       setError('Open this from a group to upload receipts');
       return;
     }
     galleryInputRef.current?.click();
   };
+
+  const canUpload = !!(groupId || transactionId);
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
@@ -131,7 +143,7 @@ export function ReceiptScanPage({ groupId, onNavigate, theme }: ReceiptScanPageP
             <div className="space-y-3">
               <button
                 onClick={handleTakePhoto}
-                disabled={uploading || !groupId}
+                disabled={uploading || !canUpload}
                 className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-[18px] font-bold shadow-xl shadow-purple-300/50 active:scale-[0.98] transition-transform flex items-center justify-center gap-2.5 text-[16px] disabled:opacity-60"
               >
                 <Camera size={22} strokeWidth={2.5} />
@@ -139,7 +151,7 @@ export function ReceiptScanPage({ groupId, onNavigate, theme }: ReceiptScanPageP
               </button>
               <button
                 onClick={handleChooseGallery}
-                disabled={uploading || !groupId}
+                disabled={uploading || !canUpload}
                 className={`w-full ${
                   isDark
                     ? 'bg-slate-700 text-white border-slate-600'

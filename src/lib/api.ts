@@ -112,7 +112,13 @@ export const api = {
     logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
   },
   users: {
-    me: () => request<{ id: string; email: string; name: string; paymentMethods: unknown[] }>('/users/me'),
+    me: () => request<{ id: string; email: string; name: string; phone?: string; bank_linked: boolean; paymentMethods: unknown[] }>('/users/me'),
+    updateProfile: (data: { name?: string; email?: string; phone?: string }) =>
+      request<{ id: string; email: string; name: string; phone: string }>('/users/me', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+    linkBank: () => request<{ ok: boolean; bank_linked: boolean }>('/users/link-bank', { method: 'POST' }),
     addPaymentMethod: (type: 'bank' | 'card', lastFour: string, brand?: string) =>
       request<{ id: string; type: string; last_four: string; brand: string | null }>(
         '/users/payment-methods',
@@ -128,9 +134,17 @@ export const api = {
         body: JSON.stringify({ name, memberEmails }),
       }),
     get: (groupId: string) =>
-      request<{ id: string; name: string; members: { id: string; name: string; email: string }[]; cardLastFour: string | null }>(
+      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string }[]; cardLastFour: string | null; inviteToken: string | null }>(
         `/groups/${groupId}`
       ),
+    joinByToken: (token: string) =>
+      request<{ groupId: string; groupName: string; joined: boolean }>(`/groups/join/${token}`, { method: 'POST' }),
+    deleteGroup: (groupId: string) =>
+      request<{ ok: boolean }>(`/groups/${groupId}`, { method: 'DELETE' }),
+    leaveGroup: (groupId: string) =>
+      request<{ ok: boolean }>(`/groups/${groupId}/leave`, { method: 'POST' }),
+    removeMember: (groupId: string, memberId: string) =>
+      request<{ ok: boolean }>(`/groups/${groupId}/members/${memberId}`, { method: 'DELETE' }),
     virtualCards: () =>
       request<{ groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[]>(
         '/groups/virtual-cards/list'
@@ -201,6 +215,71 @@ export const api = {
     mySplits: () =>
       request<{ id: string; receipt_id: string; amount: number; status: string; created_at: string; group_id: string; group_name: string }[]>(
         '/receipts/splits/me'
+      ),
+  },
+  transactions: {
+    list: (groupId: string) =>
+      request<{ id: string; status: string; split_mode: string; receipt_id: string | null; allocation_deadline_at: string | null }[]>(
+        `/transactions?groupId=${encodeURIComponent(groupId)}`
+      ),
+    create: (groupId: string, splitMode: 'EVEN_SPLIT' | 'FULL_CONTROL') =>
+      request<{ id: string; group_id: string; status: string; split_mode: string; tip_amount: number; allocation_deadline_at: string }>(
+        `/groups/${groupId}/transactions`,
+        { method: 'POST', body: JSON.stringify({ splitMode }) }
+      ),
+    get: (id: string) =>
+      request<{
+        id: string; group_id: string; created_by: string; status: string; split_mode: string;
+        tip_amount: number; subtotal: number; total: number; allocation_deadline_at: string | null;
+        receipt_id?: string; items: { id: string; name: string; price: number }[];
+        claims: Record<string, string[]>; members: { id: string; name: string; email: string }[];
+        allocations: { user_id: string; amount: number }[];
+      }>(`/transactions/${id}`),
+    uploadReceipt: (transactionId: string, file: File | Blob) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const token = getAccessToken();
+      return fetch(`${API_BASE}/transactions/${transactionId}/receipt`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+        body: formData,
+      }).then(async (r) => {
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error((err as { error?: string }).error || `Upload failed (${r.status})`);
+        }
+        return r.json();
+      });
+    },
+    setSubtotal: (transactionId: string, subtotal: number) =>
+      request<{ subtotal: number; total: number }>(`/transactions/${transactionId}/subtotal`, {
+        method: 'PUT',
+        body: JSON.stringify({ subtotal }),
+      }),
+    setTip: (transactionId: string, tipAmount: number) =>
+      request<{ tip_amount: number; total: number }>(`/transactions/${transactionId}/tip`, {
+        method: 'PUT',
+        body: JSON.stringify({ tipAmount }),
+      }),
+    setClaims: (transactionId: string, itemId: string, userIds: string[]) =>
+      request<{ userIds: string[] }>(`/transactions/${transactionId}/items/${itemId}/claims`, {
+        method: 'PUT',
+        body: JSON.stringify({ userIds }),
+      }),
+    finalize: (transactionId: string) =>
+      request<{ ok: boolean; allocations: { user_id: string; amount: number; name: string }[] }>(
+        `/transactions/${transactionId}/finalize`,
+        { method: 'POST' }
+      ),
+    settle: (transactionId: string) =>
+      request<{ ok: boolean; status: string; allocations: { user_id: string; amount: number; name: string }[] }>(
+        `/transactions/${transactionId}/settle`,
+        { method: 'POST' }
+      ),
+    activity: () =>
+      request<{ id: string; transaction_id: string; amount: number; group_id: string; status: string; created_at: string; settled_at: string | null; group_name: string }[]>(
+        '/transactions/activity/me'
       ),
   },
 };

@@ -1,4 +1,3 @@
-import { motion } from 'motion/react';
 import { ChevronLeft, Users, Plus, Search } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
@@ -31,9 +30,7 @@ export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const allGroups = groups.map((g, i) => ({
     ...g,
@@ -43,17 +40,13 @@ export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
   })).filter((g) => !searchQuery || g.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
+    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
       {/* Header */}
-      <motion.div 
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white/80 border-slate-200'} backdrop-blur-xl border-b px-5 py-5`}
-      >
+      <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} border-b px-5 py-5`}>
         <div className="flex items-center gap-3 mb-4">
-          <button 
+          <button
             onClick={() => onNavigate('home')}
-            className={`w-11 h-11 rounded-[16px] ${isDark ? 'bg-slate-700' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform shadow-sm`}
+            className={`w-11 h-11 rounded-2xl ${isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center active:scale-95 transition-transform`}
           >
             <ChevronLeft size={22} className={isDark ? 'text-white' : 'text-purple-600'} strokeWidth={2.5} />
           </button>
@@ -68,13 +61,13 @@ export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search groups..."
-            className={`w-full pl-11 pr-4 py-3.5 ${isDark ? 'bg-slate-700 text-white border-slate-600' : 'bg-white text-slate-900 border-slate-200'} rounded-[18px] text-[15px] border shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all`}
+            className={`w-full pl-11 pr-4 py-3.5 ${isDark ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-50 text-slate-900 border-slate-200'} rounded-2xl text-[15px] border focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-colors`}
           />
         </div>
-      </motion.div>
+      </div>
 
       {/* Groups List */}
-      <div className="flex-1 overflow-y-auto px-5 py-5">
+      <div className="flex-1 overflow-y-auto px-5 py-5" style={{ WebkitOverflowScrolling: 'touch' }}>
         <div className="space-y-3">
           {error && (
             <div className={`rounded-xl p-4 mb-4 ${isDark ? 'bg-amber-900/30 border-amber-700' : 'bg-amber-50 border-amber-200'} border`}>
@@ -87,16 +80,13 @@ export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
             <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>No groups yet. Create one!</p>
           )}
           {allGroups.map((group, index) => (
-            <motion.div
+            <button
               key={group.id}
-              initial={{ x: -20, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              transition={{ delay: index * 0.1, duration: 0.4 }}
               onClick={() => onNavigate({ page: 'groupDetail', groupId: group.id })}
-              className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} active:scale-[0.98] transition-transform border cursor-pointer`}
+              className={`w-full text-left ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} rounded-2xl p-5 shadow-sm active:scale-[0.98] transition-transform border`}
             >
               <div className="flex items-center gap-4">
-                <div className={`w-16 h-16 rounded-[20px] bg-gradient-to-br ${group.color} flex items-center justify-center shadow-lg shadow-purple-200/40`}>
+                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${group.color} flex items-center justify-center shadow-sm`}>
                   <Users size={28} className="text-white" strokeWidth={2.5} />
                 </div>
                 <div className="flex-1">
@@ -110,26 +100,21 @@ export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
                   <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-400'} font-medium`}>card</p>
                 </div>
               </div>
-            </motion.div>
+            </button>
           ))}
         </div>
       </div>
 
       {/* Create Group Button */}
-      <motion.div
-        initial={{ y: 20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.3 }}
-        className="px-5 pb-7"
-      >
-        <button 
+      <div className="px-5 pb-7">
+        <button
           onClick={() => onNavigate('createGroup')}
-          className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4.5 rounded-[20px] font-bold shadow-2xl shadow-purple-400/50 active:scale-[0.98] transition-transform flex items-center justify-center gap-2.5 text-[17px]"
+          className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-2.5 text-[17px]"
         >
           <Plus size={26} strokeWidth={2.5} />
           Create New Group
         </button>
-      </motion.div>
+      </div>
     </div>
   );
 }

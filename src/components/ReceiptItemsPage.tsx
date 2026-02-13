@@ -8,6 +8,7 @@ import type { PageType, PageState } from '../App';
 interface ReceiptItemsPageProps {
   receiptId: string;
   groupId: string;
+  transactionId?: string;
   onNavigate: (target: PageType | PageState) => void;
   theme: 'light' | 'dark';
 }
@@ -24,13 +25,15 @@ interface Member {
   email: string;
 }
 
-export function ReceiptItemsPage({ receiptId, groupId, onNavigate, theme }: ReceiptItemsPageProps) {
+export function ReceiptItemsPage({ receiptId, groupId, transactionId, onNavigate, theme }: ReceiptItemsPageProps) {
   const isDark = theme === 'dark';
   const { user } = useAuth();
   const [receipt, setReceipt] = useState<{
     items: Item[];
     claims: Record<string, string[]>;
     members: Member[];
+    createdBy?: string;
+    tipAmount?: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,16 +46,32 @@ export function ReceiptItemsPage({ receiptId, groupId, onNavigate, theme }: Rece
   const fetchReceipt = () => {
     setError(null);
     setLoading(true);
-    api.receipts
-      .get(receiptId)
-      .then((r) => {
-        setReceipt({
+    const load = transactionId
+      ? api.transactions.get(transactionId).then((tx) => ({
+          items: tx.items,
+          claims: tx.claims || {},
+          members: tx.members,
+          created_by: tx.created_by,
+          tipAmount: tx.tip_amount ?? 0,
+        }))
+      : api.receipts.get(receiptId).then((r) => ({
           items: r.items,
           claims: r.claims || {},
           members: r.members,
+          created_by: undefined as string | undefined,
+          tipAmount: 0,
+        }));
+    load
+      .then((data) => {
+        setReceipt({
+          items: data.items,
+          claims: data.claims,
+          members: data.members,
+          createdBy: data.created_by,
+          tipAmount: data.tipAmount ?? 0,
         });
-        if (!selectedMemberId && r.members.length > 0) {
-          setSelectedMemberId(r.members[0].id);
+        if (!selectedMemberId && data.members.length > 0) {
+          setSelectedMemberId(data.members[0].id);
         }
       })
       .catch((err) => {
@@ -64,7 +83,7 @@ export function ReceiptItemsPage({ receiptId, groupId, onNavigate, theme }: Rece
 
   useEffect(() => {
     fetchReceipt();
-  }, [receiptId]);
+  }, [receiptId, transactionId]);
 
   const toggleClaim = (itemId: string, userId: string) => {
     if (!receipt) return;
@@ -72,8 +91,10 @@ export function ReceiptItemsPage({ receiptId, groupId, onNavigate, theme }: Rece
     const next = current.includes(userId)
       ? current.filter((id) => id !== userId)
       : [...current, userId];
-    api.receipts
-      .updateClaims(receiptId, itemId, next)
+    const apiCall = transactionId
+      ? api.transactions.setClaims(transactionId, itemId, next)
+      : api.receipts.updateClaims(receiptId, itemId, next);
+    apiCall
       .then(() => {
         setReceipt({
           ...receipt,
@@ -81,7 +102,6 @@ export function ReceiptItemsPage({ receiptId, groupId, onNavigate, theme }: Rece
         });
       })
       .catch(() => {
-        // Keep UI in sync - revert optimistic update on failure
         setReceipt({ ...receipt });
       });
   };
@@ -105,7 +125,16 @@ export function ReceiptItemsPage({ receiptId, groupId, onNavigate, theme }: Rece
       .finally(() => setAddingItem(false));
   };
 
-  const total = receipt?.items.reduce((s, i) => s + i.price, 0) ?? 0;
+  const subtotal = receipt?.items.reduce((s, i) => s + i.price, 0) ?? 0;
+  const tipAmount = receipt?.tipAmount ?? 0;
+  const total = subtotal + tipAmount;
+
+  const handleTipChange = (v: number) => {
+    if (!transactionId || !receipt || !isCreator) return;
+    api.transactions.setTip(transactionId, v).then(() => {
+      setReceipt({ ...receipt, tipAmount: v });
+    }).catch(() => {});
+  };
 
   const getMemberTotal = (memberId: string) => {
     if (!receipt) return 0;
@@ -121,16 +150,26 @@ export function ReceiptItemsPage({ receiptId, groupId, onNavigate, theme }: Rece
     receipt.items.length > 0 &&
     receipt.items.every((item) => (receipt.claims[item.id] || []).length > 0);
 
+  const isCreator = transactionId && receipt?.createdBy === user?.id;
+  const canConfirmTransaction = transactionId && receipt && receipt.items.length > 0 && isCreator;
+  const canConfirmReceipt = !transactionId && allItemsClaimed;
+
   const handleComplete = () => {
-    if (!allItemsClaimed) return;
-    setSubmitting(true);
-    api.receipts
-      .complete(receiptId)
-      .then(({ splits }) => {
-        onNavigate({ page: 'processing', groupId, splits });
-      })
-      .catch(() => setSubmitting(false))
-      .finally(() => setSubmitting(false));
+    if (transactionId) {
+      // For item split: just confirm selections and go back to group page
+      // The group page will show the breakdown + tip + final confirm & pay
+      onNavigate({ page: 'groupDetail', groupId });
+    } else {
+      if (!canConfirmReceipt) return;
+      setSubmitting(true);
+      api.receipts
+        .complete(receiptId)
+        .then(({ splits }) => {
+          onNavigate({ page: 'processing', groupId, splits });
+        })
+        .catch(() => setSubmitting(false))
+        .finally(() => setSubmitting(false));
+    }
   };
 
   if (error) {
@@ -313,21 +352,21 @@ export function ReceiptItemsPage({ receiptId, groupId, onNavigate, theme }: Rece
             </p>
           </div>
         )}
-        {receipt.items.length > 0 && !allItemsClaimed && (
+        {receipt.items.length > 0 && !transactionId && !allItemsClaimed && (
           <p className="text-xs text-orange-500 mb-2">All items must be assigned before submitting</p>
         )}
         <button
           onClick={handleComplete}
-          disabled={!allItemsClaimed || submitting}
+          disabled={transactionId ? !canConfirmTransaction : (!canConfirmReceipt || submitting)}
           className={`w-full py-4 rounded-xl font-semibold ${
-            allItemsClaimed && !submitting
-              ? 'bg-gradient-to-r from-slate-600 to-blue-500 text-white'
+            (transactionId ? canConfirmTransaction : canConfirmReceipt) && !submitting
+              ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
               : isDark
                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
           }`}
         >
-          {submitting ? 'Processing...' : 'Submit & Save Split'}
+          {submitting ? 'Processing...' : transactionId ? 'Confirm Selections' : 'Confirm & Pay'}
         </button>
       </div>
     </div>

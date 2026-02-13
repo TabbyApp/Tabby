@@ -106,3 +106,52 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
   CREATE INDEX IF NOT EXISTS idx_receipts_group ON receipts(group_id);
 `);
+
+// MVP: bank_linked, transactions, transaction_allocations
+try {
+  db.prepare('ALTER TABLE users ADD COLUMN bank_linked INTEGER DEFAULT 0').run();
+} catch { /* column may already exist */ }
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS transactions (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    created_by TEXT NOT NULL REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'PENDING_ALLOCATION',
+    split_mode TEXT NOT NULL CHECK (split_mode IN ('EVEN_SPLIT', 'FULL_CONTROL')),
+    tip_amount REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    allocation_deadline_at TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    finalized_at TEXT,
+    settled_at TEXT,
+    archived_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS transaction_allocations (
+    id TEXT PRIMARY KEY,
+    transaction_id TEXT NOT NULL REFERENCES transactions(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    amount REAL NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(transaction_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_transactions_group ON transactions(group_id);
+  CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
+  CREATE INDEX IF NOT EXISTS idx_transactions_deadline ON transactions(allocation_deadline_at);
+  CREATE INDEX IF NOT EXISTS idx_transaction_allocations_tx ON transaction_allocations(transaction_id);
+`);
+
+try {
+  db.prepare('ALTER TABLE receipts ADD COLUMN transaction_id TEXT').run();
+} catch { /* column may already exist */ }
+
+try {
+  db.prepare('ALTER TABLE groups ADD COLUMN invite_token TEXT').run();
+} catch { /* column may already exist */ }
+
+try {
+  db.prepare('ALTER TABLE users ADD COLUMN phone TEXT').run();
+} catch { /* column may already exist */ }

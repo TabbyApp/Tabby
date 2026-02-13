@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { ChevronLeft, CreditCard, Copy, ArrowUpRight, ArrowDownLeft, Users } from 'lucide-react';
+import { ChevronLeft, CreditCard, Copy, Receipt } from 'lucide-react';
 import { PageType } from '../App';
 
 interface CardDetailsPageProps {
@@ -11,16 +11,8 @@ export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
   const isDark = theme === 'dark';
 
   const transactions = [
-    { id: 1, type: 'charge', description: 'Pizza Palace', amount: 15.50, date: '2h ago', user: 'You' },
-    { id: 2, type: 'payment', description: 'Sarah paid in', amount: 12.20, date: '3h ago', user: 'Sarah' },
-    { id: 3, type: 'charge', description: 'Coffee Shop', amount: 18.10, date: '1d ago', user: 'Mike' },
-  ];
-
-  const groupMembers = [
-    { id: 1, name: 'You', balance: 15.50, avatar: '👤' },
-    { id: 2, name: 'Sarah', balance: -12.20, avatar: '👩' },
-    { id: 3, name: 'Mike', balance: 18.10, avatar: '👨' },
-    { id: 4, name: 'Emma', balance: 12.20, avatar: '👧' },
+    { id: 1, description: 'Pizza Palace', amount: 15.50, date: '2h ago' },
+    { id: 2, description: 'Coffee Shop', amount: 18.10, date: '1d ago' },
   ];
 
   const copyCardNumber = () => {
@@ -86,61 +78,6 @@ export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
           </div>
         </motion.div>
 
-        {/* Balance Summary */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-5 shadow-sm mb-6`}
-        >
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-2`}>Total Balance</p>
-          <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-800'} mb-4`}>$45.80</p>
-          <div className="flex items-center gap-2">
-            <div className="flex -space-x-2">
-              {groupMembers.slice(0, 3).map((member) => (
-                <div key={member.id} className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 border-2 border-white flex items-center justify-center text-sm">
-                  {member.avatar}
-                </div>
-              ))}
-            </div>
-            <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-              {groupMembers.length} members in group
-            </p>
-          </div>
-        </motion.div>
-
-        {/* Group Members */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.3 }}
-          className="mb-6"
-        >
-          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>
-            Group Members
-          </h2>
-          <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
-            {groupMembers.map((member, index) => (
-              <div 
-                key={member.id}
-                className={`flex items-center justify-between p-4 ${
-                  index !== groupMembers.length - 1 ? `border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}` : ''
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-lg">
-                    {member.avatar}
-                  </div>
-                  <p className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>{member.name}</p>
-                </div>
-                <p className={`font-semibold ${member.balance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {member.balance >= 0 ? '+' : ''}${member.balance.toFixed(2)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-
         {/* Transaction History */}
         <motion.div
           initial={{ y: 20, opacity: 0 }}
@@ -148,33 +85,25 @@ export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
           transition={{ delay: 0.4 }}
         >
           <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>
-            Recent Transactions
+            Recent Sessions
           </h2>
           <div className="space-y-3">
             {transactions.map((transaction) => (
               <div key={transaction.id} className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    transaction.type === 'charge' ? 'bg-red-100' : 'bg-green-100'
-                  }`}>
-                    {transaction.type === 'charge' ? (
-                      <ArrowUpRight size={20} className="text-red-500" />
-                    ) : (
-                      <ArrowDownLeft size={20} className="text-green-500" />
-                    )}
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center bg-slate-100">
+                    <Receipt size={20} className="text-slate-500" />
                   </div>
                   <div className="flex-1">
                     <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
                       {transaction.description}
                     </p>
                     <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {transaction.user} • {transaction.date}
+                      {transaction.date}
                     </p>
                   </div>
-                  <p className={`font-bold ${
-                    transaction.type === 'charge' ? 'text-red-500' : 'text-green-500'
-                  }`}>
-                    {transaction.type === 'charge' ? '-' : '+'}${transaction.amount.toFixed(2)}
+                  <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                    ${transaction.amount.toFixed(2)}
                   </p>
                 </div>
               </div>
