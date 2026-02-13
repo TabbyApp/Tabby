@@ -5,6 +5,7 @@ import { PageType, PageState } from '../App';
 
 interface ProcessingPaymentPageProps {
   groupId?: string;
+  transactionId?: string;
   splits: { user_id: string; amount: number; name: string }[];
   currentUserId?: string | null;
   onNavigate: (target: PageType | PageState) => void;
@@ -13,7 +14,7 @@ interface ProcessingPaymentPageProps {
 
 const AVATARS = ['👤', '👩', '👨', '👧', '🙂'];
 
-export function ProcessingPaymentPage({ groupId, splits, currentUserId, onNavigate, theme }: ProcessingPaymentPageProps) {
+export function ProcessingPaymentPage({ groupId, transactionId, splits, currentUserId, onNavigate, theme }: ProcessingPaymentPageProps) {
   const isDark = theme === 'dark';
   const [step, setStep] = useState<'processing' | 'success'>('processing');
 
@@ -30,7 +31,7 @@ export function ProcessingPaymentPage({ groupId, splits, currentUserId, onNaviga
       if (groupId) {
         onNavigate({ page: 'groupDetail', groupId });
       } else {
-        onNavigate('home');
+        onNavigate('activity');
       }
     }, 4500);
     return () => {

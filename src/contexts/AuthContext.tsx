@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api, setAccessToken, clearTokens } from '../lib/api';
 
-type User = { id: string; email: string; name: string } | null;
+type User = { id: string; email: string; name: string; bank_linked?: boolean } | null;
 
 type AuthContextValue = {
   user: User;
@@ -31,7 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     api.users
       .me()
       .then((data) => {
-        setUserState({ id: data.id, email: data.email, name: data.name });
+        setUserState({ id: data.id, email: data.email, name: data.name, bank_linked: data.bank_linked });
       })
       .catch((err) => {
         const msg = err instanceof Error ? err.message : '';
@@ -49,7 +49,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await api.auth.login(email, password);
       setAccessToken(data.accessToken);
-      setUserState(data.user);
+      const me = await api.users.me();
+      setUserState({ ...data.user, bank_linked: me.bank_linked });
     } catch (err) {
       throw err instanceof Error ? err : new Error('Login failed');
     }
@@ -59,7 +60,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const data = await api.auth.signup(email, password, name);
       setAccessToken(data.accessToken);
-      setUserState(data.user);
+      const me = await api.users.me();
+      setUserState({ ...data.user, bank_linked: me.bank_linked });
     } catch (err) {
       throw err instanceof Error ? err : new Error('Sign up failed');
     }

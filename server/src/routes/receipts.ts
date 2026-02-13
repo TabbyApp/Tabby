@@ -122,17 +122,27 @@ receiptsRouter.get('/', requireAuth, (req, res) => {
       return res.status(404).json({ error: 'Group not found' });
     }
     const receipts = db.prepare(
-      'SELECT id, group_id, status, total, created_at FROM receipts WHERE group_id = ? ORDER BY created_at DESC'
-    ).all(groupId) as { id: string; group_id: string; status: string; total: number | null; created_at: string }[];
+      'SELECT id, group_id, status, total, created_at, transaction_id FROM receipts WHERE group_id = ? ORDER BY created_at DESC'
+    ).all(groupId) as { id: string; group_id: string; status: string; total: number | null; created_at: string; transaction_id: string | null }[];
 
     const withSplits = receipts.map((r) => {
       try {
-        const splits = db.prepare(
-          `SELECT rs.user_id, rs.amount, rs.status, u.name
-           FROM receipt_splits rs
-           JOIN users u ON rs.user_id = u.id
-           WHERE rs.receipt_id = ?`
-        ).all(r.id) as { user_id: string; amount: number; status: string; name: string }[];
+        let splits: { user_id: string; amount: number; status: string; name: string }[];
+        if (r.transaction_id) {
+          splits = db.prepare(
+            `SELECT ta.user_id, ta.amount, 'completed' as status, u.name
+             FROM transaction_allocations ta
+             JOIN users u ON ta.user_id = u.id
+             WHERE ta.transaction_id = ?`
+          ).all(r.transaction_id) as { user_id: string; amount: number; status: string; name: string }[];
+        } else {
+          splits = db.prepare(
+            `SELECT rs.user_id, rs.amount, rs.status, u.name
+             FROM receipt_splits rs
+             JOIN users u ON rs.user_id = u.id
+             WHERE rs.receipt_id = ?`
+          ).all(r.id) as { user_id: string; amount: number; status: string; name: string }[];
+        }
         return { ...r, splits };
       } catch {
         return { ...r, splits: [] };

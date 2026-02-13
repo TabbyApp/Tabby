@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { db } from '../db.js';
 
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'dev-access-secret-change-in-prod';
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-prod';
@@ -58,5 +59,15 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   }
 
   (req as Request & { user: JwtPayload }).user = payload;
+  next();
+}
+
+// Must be used after requireAuth
+export function requireBankLinked(req: Request, res: Response, next: NextFunction) {
+  const { userId } = (req as any).user;
+  const row = db.prepare('SELECT bank_linked FROM users WHERE id = ?').get(userId) as { bank_linked?: number } | undefined;
+  if (!row || !row.bank_linked) {
+    return res.status(403).json({ error: 'Please link your bank account before performing this action' });
+  }
   next();
 }

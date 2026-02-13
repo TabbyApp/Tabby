@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SplashScreen } from './components/SplashScreen';
 import { LoginSignup } from './components/LoginSignup';
@@ -15,17 +15,23 @@ import { CreateGroupPage } from './components/CreateGroupPage';
 import { ReceiptScanPage } from './components/ReceiptScanPage';
 import { ReceiptItemsPage } from './components/ReceiptItemsPage';
 import { ProcessingPaymentPage } from './components/ProcessingPaymentPage';
+import { LinkBankPage } from './components/LinkBankPage';
+import { TransactionAllocationPage } from './components/TransactionAllocationPage';
 import { useAuth } from './contexts/AuthContext';
 
 export type PageType = 'home' | 'groups' | 'groupDetail' | 'activity' | 'create' | 'account' | 'settings' |
-  'wallet' | 'cardDetails' | 'createGroup' | 'receiptScan' | 'receiptItems' | 'processing';
+  'wallet' | 'cardDetails' | 'createGroup' | 'linkBank' | 'receiptScan' | 'receiptItems' | 'processing' | 'transactionAllocation';
 
 export type PageState = {
   page: PageType;
   groupId?: string;
+  transactionId?: string;
   receiptId?: string;
   splits?: { user_id: string; amount: number; name: string }[];
 };
+
+// Pages that stay mounted for instant tab switching
+const PERSISTENT_TABS = new Set<PageType>(['home', 'groups', 'activity']);
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(true);
@@ -33,14 +39,44 @@ export default function App() {
   const isAuthenticated = !!user;
   const [pageState, setPageState] = useState<PageState>({ page: 'home' });
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  // Track which persistent tabs have been visited so we mount them lazily
+  const [visitedTabs, setVisitedTabs] = useState<Set<PageType>>(new Set(['home']));
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    let inviteToken = params.get('invite');
+    if (inviteToken) {
+      sessionStorage.setItem('tabby_invite', inviteToken);
+      window.history.replaceState({}, '', window.location.pathname || '/');
+    } else {
+      inviteToken = sessionStorage.getItem('tabby_invite');
+    }
+    if (inviteToken && user?.bank_linked) {
+      sessionStorage.removeItem('tabby_invite');
+      import('./lib/api').then(({ api }) => {
+        api.groups.joinByToken(inviteToken!)
+          .then(({ groupId }) => {
+            setPageState({ page: 'groupDetail', groupId });
+          })
+          .catch(() => {});
+      });
+    }
+  }, [user?.bank_linked]);
 
   const setCurrentPage = (pageOrState: PageType | PageState) => {
-    if (typeof pageOrState === 'object') {
-      setPageState(pageOrState);
-    } else {
-      setPageState({ page: pageOrState });
+    const next = typeof pageOrState === 'object' ? pageOrState : { page: pageOrState };
+    setPageState(next);
+    // Mark persistent tabs as visited so they mount
+    if (PERSISTENT_TABS.has(next.page)) {
+      setVisitedTabs((prev) => {
+        if (prev.has(next.page)) return prev;
+        const n = new Set(prev);
+        n.add(next.page);
+        return n;
+      });
     }
   };
+
   const currentPage = pageState.page;
 
   return (
@@ -71,43 +107,48 @@ export default function App() {
           <SplashScreen onComplete={() => setShowSplash(false)} />
         ) : !isAuthenticated ? (
           <LoginSignup onAuthenticate={() => {}} />
+        ) : !user?.bank_linked ? (
+          <LinkBankPage onNavigate={setCurrentPage} theme={theme} />
         ) : (
           <>
-            {pageState.page === 'home' && <LandingPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'groups' && <GroupsPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'groupDetail' && pageState.groupId && (
+            {/* Persistent tabs: mount once, show/hide with CSS for instant switching */}
+            {visitedTabs.has('home') && (
+              <div style={{ display: currentPage === 'home' ? 'contents' : 'none' }}>
+                <LandingPage onNavigate={setCurrentPage} theme={theme} />
+              </div>
+            )}
+            {visitedTabs.has('groups') && (
+              <div style={{ display: currentPage === 'groups' ? 'contents' : 'none' }}>
+                <GroupsPage onNavigate={setCurrentPage} theme={theme} />
+              </div>
+            )}
+            {visitedTabs.has('activity') && (
+              <div style={{ display: currentPage === 'activity' ? 'contents' : 'none' }}>
+                <ActivityPage onNavigate={setCurrentPage} theme={theme} />
+              </div>
+            )}
+
+            {/* Non-persistent pages: mount/unmount as before */}
+            {currentPage === 'groupDetail' && pageState.groupId && (
               <GroupDetailPage groupId={pageState.groupId} onNavigate={setCurrentPage} theme={theme} />
             )}
-            {pageState.page === 'activity' && <ActivityPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'create' && <CreateExpensePage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'account' && <AccountPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'settings' && <SettingsPage onNavigate={setCurrentPage} theme={theme} onThemeChange={setTheme} />}
-            {pageState.page === 'wallet' && <VirtualWalletPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'cardDetails' && <CardDetailsPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'createGroup' && <CreateGroupPage onNavigate={setCurrentPage} theme={theme} />}
-            {pageState.page === 'receiptScan' && (
-              <ReceiptScanPage
-                groupId={pageState.groupId}
-                onNavigate={setCurrentPage}
-                theme={theme}
-              />
+            {currentPage === 'create' && <CreateExpensePage onNavigate={setCurrentPage} theme={theme} />}
+            {currentPage === 'account' && <AccountPage onNavigate={setCurrentPage} theme={theme} />}
+            {currentPage === 'settings' && <SettingsPage onNavigate={setCurrentPage} theme={theme} onThemeChange={setTheme} />}
+            {currentPage === 'wallet' && <VirtualWalletPage onNavigate={setCurrentPage} theme={theme} />}
+            {currentPage === 'cardDetails' && <CardDetailsPage onNavigate={setCurrentPage} theme={theme} />}
+            {currentPage === 'createGroup' && <CreateGroupPage onNavigate={setCurrentPage} theme={theme} />}
+            {currentPage === 'receiptScan' && (
+              <ReceiptScanPage groupId={pageState.groupId} transactionId={pageState.transactionId} onNavigate={setCurrentPage} theme={theme} />
             )}
-            {pageState.page === 'receiptItems' && pageState.receiptId && pageState.groupId && (
-              <ReceiptItemsPage
-                receiptId={pageState.receiptId}
-                groupId={pageState.groupId}
-                onNavigate={setCurrentPage}
-                theme={theme}
-              />
+            {currentPage === 'receiptItems' && pageState.receiptId && pageState.groupId && (
+              <ReceiptItemsPage receiptId={pageState.receiptId} groupId={pageState.groupId} onNavigate={setCurrentPage} theme={theme} />
             )}
-            {pageState.page === 'processing' && (
-              <ProcessingPaymentPage
-                groupId={pageState.groupId}
-                splits={pageState.splits ?? []}
-                currentUserId={user?.id}
-                onNavigate={setCurrentPage}
-                theme={theme}
-              />
+            {currentPage === 'transactionAllocation' && pageState.transactionId && pageState.groupId && (
+              <TransactionAllocationPage transactionId={pageState.transactionId} groupId={pageState.groupId} onNavigate={setCurrentPage} theme={theme} />
+            )}
+            {currentPage === 'processing' && (
+              <ProcessingPaymentPage groupId={pageState.groupId} transactionId={pageState.transactionId} splits={pageState.splits ?? []} currentUserId={user?.id} onNavigate={setCurrentPage} theme={theme} />
             )}
           </>
         )}
