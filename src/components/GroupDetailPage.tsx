@@ -9,9 +9,13 @@ import type { PageType, PageState } from '../App';
 type SplitMode = 'EVEN_SPLIT' | 'FULL_CONTROL';
 
 interface GroupDetailPageProps {
-  groupId: string;
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
+  groupId: string | null;
+  groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
+  deleteGroup: (groupId: string) => void;
+  leaveGroup: (groupId: string) => void;
+  currentUserId: string;
 }
 
 type GroupReceipt = {
@@ -119,13 +123,128 @@ export function GroupDetailPage({ groupId, onNavigate, theme }: GroupDetailPageP
     );
   }
 
-  if (loading || !group) {
-    return (
-      <div className={`h-[calc(100vh-48px-24px)] flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
-        <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>Loading...</p>
-      </div>
-    );
-  }
+  // Find current group from groups array
+  const currentGroup = groups.find(g => g.id === groupId);
+  const isCreator = currentGroup?.createdBy === currentUserId;
+
+  // Mock data - would come from props/state in real app
+  const groupDataBase = {
+    1: {
+      id: 1,
+      name: 'Lunch Squad', 
+      members: [
+        { id: 1, name: 'You', balance: 15.50, avatar: '👤', isYou: true },
+        { id: 2, name: 'Sarah Mitchell', balance: -12.20, avatar: '👩', isYou: false },
+        { id: 3, name: 'Mike Johnson', balance: 18.10, avatar: '👨', isYou: false },
+        { id: 4, name: 'Emma Davis', balance: -21.40, avatar: '👧', isYou: false },
+      ],
+      balance: 45.80,
+      yourBalance: 15.50,
+      transactions: [
+        { id: 1, description: 'Pizza Palace', amount: 45.80, date: '2h ago', type: 'expense', receipts: 3 },
+        { id: 2, description: 'Coffee Shop', amount: 18.20, date: '1d ago', type: 'expense', receipts: 2 },
+        { id: 3, description: 'Sarah paid you', amount: 12.20, date: '2d ago', type: 'payment', receipts: 0 },
+      ]
+    },
+    2: { 
+      id: 2, 
+      name: 'Roommates',
+      members: [
+        { id: 1, name: 'You', balance: 50.00, avatar: '👤', isYou: true },
+        { id: 2, name: 'Alex', balance: -25.00, avatar: '👨', isYou: false },
+        { id: 3, name: 'Jordan', balance: -25.00, avatar: '👩', isYou: false },
+      ],
+      balance: 120.00,
+      yourBalance: 50.00,
+      transactions: [
+        { id: 1, description: 'Groceries', amount: 120.00, date: '1d ago', type: 'expense', receipts: 5 },
+      ]
+    },
+    3: { 
+      id: 3, 
+      name: 'Road Trip 2026',
+      members: [
+        { id: 1, name: 'You', balance: 0, avatar: '👤', isYou: true },
+        { id: 2, name: 'James', balance: 0, avatar: '👨', isYou: false },
+        { id: 3, name: 'Lisa', balance: 0, avatar: '👩', isYou: false },
+        { id: 4, name: 'David', balance: 0, avatar: '👨', isYou: false },
+        { id: 5, name: 'Emily', balance: 0, avatar: '👧', isYou: false },
+        { id: 6, name: 'Chris', balance: 0, avatar: '👦', isYou: false },
+      ],
+      balance: 0,
+      yourBalance: 0,
+      transactions: []
+    },
+    4: { 
+      id: 4, 
+      name: 'Office Lunch',
+      members: [
+        { id: 1, name: 'You', balance: 25.00, avatar: '👤', isYou: true },
+        { id: 2, name: 'Tom', balance: -12.50, avatar: '👨', isYou: false },
+        { id: 3, name: 'Rachel', balance: 30.00, avatar: '👩', isYou: false },
+        { id: 4, name: 'Steve', balance: -18.00, avatar: '👨', isYou: false },
+        { id: 5, name: 'Megan', balance: -24.50, avatar: '👧', isYou: false },
+      ],
+      balance: 67.50,
+      yourBalance: 25.00,
+      transactions: [
+        { id: 1, description: 'Sushi Restaurant', amount: 67.50, date: '3h ago', type: 'expense', receipts: 2 },
+        { id: 2, description: 'Coffee & Bagels', amount: 28.00, date: '2d ago', type: 'expense', receipts: 1 },
+      ]
+    },
+  };
+
+  // Track removed members
+  const [removedMembers, setRemovedMembers] = useState<number[]>([]);
+
+  // Use mock data when available; for API string ids use fallback (first mock group)
+  const baseGroup = (groupId && (groupDataBase as Record<string, typeof groupDataBase[1]>)[String(groupId)]) ?? groupDataBase[1];
+  
+  // Filter out removed members
+  const group = {
+    ...baseGroup,
+    members: baseGroup.members.filter(m => !removedMembers.includes(m.id))
+  };
+
+  const handleRemoveMember = (member: any) => {
+    setSelectedMember(member);
+    setShowRemoveMemberModal(true);
+    setShowMenu(false);
+  };
+
+  const confirmRemoveMember = () => {
+    if (selectedMember) {
+      setRemovedMembers([...removedMembers, selectedMember.id]);
+      setShowRemoveMemberModal(false);
+      setSelectedMember(null);
+    }
+  };
+
+  const handleDeleteGroup = () => {
+    // Mock implementation - in real app would delete from database
+    console.log('Deleting group:', groupId);
+    if (groupId) {
+      deleteGroup(groupId);
+    }
+    setShowDeleteModal(false);
+    // Navigate back to groups page
+    setTimeout(() => {
+      onNavigate('groups');
+    }, 100);
+  };
+
+  const handleLeaveGroup = () => {
+    // Mock implementation - in real app would remove user from group
+    console.log('Leaving group:', groupId);
+    if (groupId) {
+      leaveGroup(groupId);
+    }
+    setShowLeaveModal(false);
+    // Navigate back to groups page
+    setTimeout(() => {
+      onNavigate('groups');
+    }, 100);
+  };
 
   const isCreator = group.created_by === user?.id;
   const extractedTotal = evenTx?.subtotal ?? 0;
@@ -477,6 +596,7 @@ export function GroupDetailPage({ groupId, onNavigate, theme }: GroupDetailPageP
           </div>
           <button onClick={() => onNavigate('wallet')} className="text-blue-500 text-sm font-medium">View in Wallet</button>
         </div>
+      </motion.div>
 
         {/* Members list */}
         <div>
@@ -511,7 +631,7 @@ export function GroupDetailPage({ groupId, onNavigate, theme }: GroupDetailPageP
               </div>
             ))}
           </div>
-        </div>
+        </motion.div>
 
         {/* Split modes */}
         <AnimatePresence mode="wait">
@@ -729,10 +849,12 @@ export function GroupDetailPage({ groupId, onNavigate, theme }: GroupDetailPageP
                 <div key={r.id} className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm border ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                        {new Date(r.created_at).toLocaleDateString()} {new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        {transaction.description}
                       </p>
-                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.status === 'completed' ? 'Completed' : 'Pending'}</p>
+                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                        {transaction.date}
+                      </p>
                     </div>
                     <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>${r.total ? r.total.toFixed(2) : '—'}</p>
                   </div>

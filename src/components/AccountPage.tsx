@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { PageType } from '../App';
 
 interface AccountPageProps {
-  onNavigate: (page: PageType) => void;
+  onNavigate: (page: PageType, groupId?: number) => void;
   theme: 'light' | 'dark';
 }
 
@@ -112,7 +112,6 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
               </div>
               <button type="button" onClick={() => openEdit('name')} className="text-blue-500 text-sm font-medium">Edit</button>
             </div>
-          </div>
 
           <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
             <div className="flex items-center gap-3">
@@ -125,7 +124,6 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
               </div>
               <button type="button" onClick={() => openEdit('email')} className="text-blue-500 text-sm font-medium">Edit</button>
             </div>
-          </div>
 
           <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
             <div className="flex items-center gap-3">
@@ -140,6 +138,28 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
               </div>
               <button type="button" onClick={() => openEdit('phone')} className="text-blue-500 text-sm font-medium">Edit</button>
             </div>
+            <button 
+              onClick={connectPlaid}
+              className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700'} py-3 rounded-xl font-medium active:scale-[0.98] transition-transform`}
+            >
+              Change Bank Account
+            </button>
+          </div>
+
+          {/* Add Another Bank */}
+          <button 
+            onClick={connectPlaid}
+            className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-xl font-semibold shadow-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2"
+          >
+            <Building2 size={20} />
+            Connect Bank Account via Plaid
+          </button>
+
+          {/* Plaid Info */}
+          <div className={`${isDark ? 'bg-blue-900/30 border-blue-700' : 'bg-blue-50 border-blue-200'} border rounded-xl p-4 mt-4`}>
+            <p className={`text-sm ${isDark ? 'text-blue-300' : 'text-blue-900'}`}>
+              🔒 We use Plaid to securely connect your bank account. Your credentials are never stored on our servers.
+            </p>
           </div>
         </div>
 
@@ -157,7 +177,7 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
                 <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>Visa •••• 1234</p>
                 <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Expires 12/26</p>
               </div>
-              <button className="text-blue-500 text-sm font-medium">Manage</button>
+              <button className="text-violet-600 text-sm font-medium">Manage</button>
             </div>
           </div>
         </div>

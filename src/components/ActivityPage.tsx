@@ -4,17 +4,8 @@ import { api } from '../lib/api';
 import type { PageType, PageState } from '../App';
 
 interface ActivityPageProps {
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: number) => void;
   theme: 'light' | 'dark';
-}
-
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
-  return d.toLocaleDateString();
 }
 
 export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
@@ -30,7 +21,7 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
   }, []);
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
       {/* Header */}
       <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}>
         <div className="flex items-center gap-3">
@@ -61,8 +52,16 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
               className={`w-full text-left ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm active:scale-[0.98] transition-transform`}
             >
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center bg-purple-100">
-                  <Receipt size={20} className="text-purple-500" strokeWidth={2.5} />
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                  transaction.type === 'paid' 
+                    ? 'bg-red-100' 
+                    : 'bg-green-100'
+                }`}>
+                  {transaction.type === 'paid' ? (
+                    <ArrowUpRight size={20} className="text-red-500" strokeWidth={2.5} />
+                  ) : (
+                    <ArrowDownLeft size={20} className="text-green-500" strokeWidth={2.5} />
+                  )}
                 </div>
                 <div className="flex-1">
                   <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{item.group_name}</h3>

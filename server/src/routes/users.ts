@@ -9,6 +9,16 @@ function genId() {
   return crypto.randomUUID();
 }
 
+// Normalize phone to E.164 (same as groups/auth routes)
+function normalizePhone(input: string): string {
+  if (!input) return '';
+  const digits = input.replace(/\D/g, '');
+  if (digits.length === 10) return '+1' + digits;
+  if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;
+  if (digits.length >= 10) return '+' + digits;
+  return '';
+}
+
 // Get current user profile
 usersRouter.get('/me', requireAuth, (req, res) => {
   const { userId } = (req as any).user;

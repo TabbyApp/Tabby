@@ -8,6 +8,7 @@ type AuthContextValue = {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name: string) => Promise<void>;
+  loginWithPhone: (phone: string, code: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (u: User) => void;
 };
@@ -67,6 +68,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const loginWithPhone = useCallback(async (phone: string, code: string, name?: string) => {
+    try {
+      const data = await api.auth.verifyOtp(phone, code, name);
+      setAccessToken(data.accessToken);
+      setUserState(data.user);
+    } catch (err) {
+      throw err instanceof Error ? err : new Error('Sign in failed');
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.auth.logout();
@@ -77,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, loginWithPhone, logout, setUser }}>
       {children}
     </AuthContext.Provider>
   );

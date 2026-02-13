@@ -3,7 +3,7 @@ import { ChevronLeft, CreditCard, Copy, Receipt } from 'lucide-react';
 import { PageType } from '../App';
 
 interface CardDetailsPageProps {
-  onNavigate: (page: PageType) => void;
+  onNavigate: (page: PageType, groupId?: number) => void;
   theme: 'light' | 'dark';
 }
 
@@ -15,18 +15,14 @@ export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
     { id: 2, description: 'Coffee Shop', amount: 18.10, date: '1d ago' },
   ];
 
-  const copyCardNumber = () => {
-    try {
-      navigator.clipboard.writeText('4024007194824829');
-      // Show toast notification in real app
-    } catch (error) {
-      // Clipboard API not available or blocked
-      console.log('Copy attempted: 4024007194824829');
-    }
+  const addToAppleWallet = () => {
+    // Mock implementation for adding to Apple Wallet
+    console.log('Adding card to Apple Wallet');
+    // In a real app, this would trigger the Apple Wallet API
   };
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
       {/* Header */}
       <motion.div 
         initial={{ y: -20, opacity: 0 }}
@@ -52,30 +48,34 @@ export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
           transition={{ delay: 0.1 }}
           className="mb-6"
         >
-          <div className="bg-gradient-to-br from-slate-700 to-blue-600 rounded-2xl p-6 shadow-xl">
+          <div className="bg-gradient-to-br from-purple-600 via-indigo-600 to-blue-600 rounded-2xl p-6 shadow-xl">
             <div className="flex items-start justify-between mb-8">
               <div>
-                <p className="text-blue-100 text-xs mb-1">Virtual Group Card</p>
+                <p className="text-purple-200 text-xs mb-1">Virtual Group Card</p>
                 <p className="text-white font-mono text-xl">4024 0071 9482 4829</p>
               </div>
-              <button 
-                onClick={copyCardNumber}
-                className="p-2 bg-white/20 rounded-lg active:scale-95 transition-transform"
-              >
-                <Copy size={20} className="text-white" />
-              </button>
+              <CreditCard size={24} className="text-white/80" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-blue-100 text-xs mb-1">Expires</p>
+                <p className="text-purple-200 text-xs mb-1">Expires</p>
                 <p className="text-white font-mono">12/26</p>
               </div>
               <div>
-                <p className="text-blue-100 text-xs mb-1">CVV</p>
+                <p className="text-purple-200 text-xs mb-1">CVV</p>
                 <p className="text-white font-mono">•••</p>
               </div>
             </div>
           </div>
+          
+          {/* Add to Apple Wallet Button */}
+          <button 
+            onClick={addToAppleWallet}
+            className={`w-full mt-4 ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} border rounded-[18px] p-4 shadow-sm active:scale-[0.98] transition-transform flex items-center justify-center gap-3`}
+          >
+            <Wallet size={24} className="text-purple-600" />
+            <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Add to Apple Wallet</span>
+          </button>
         </motion.div>
 
         {/* Transaction History */}

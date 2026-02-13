@@ -4,40 +4,29 @@ import { api } from '../lib/api';
 import type { PageType, PageState } from '../App';
 
 interface GroupsPageProps {
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
+  groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
+  recentGroups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string; deletedAt: Date }>;
+  accountType: 'standard' | 'pro';
+  deleteGroup: (groupId: string) => void;
+  leaveGroup: (groupId: string) => void;
+  currentUserId: string;
 }
 
-const COLORS = ['from-blue-400 to-blue-600', 'from-purple-400 to-purple-600', 'from-green-400 to-green-600', 'from-orange-400 to-orange-600'];
-
-export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
+export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountType }: GroupsPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [groups, setGroups] = useState<{ id: string; name: string; memberCount: number; cardLastFour: string | null }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'active' | 'recent'>('active');
   const isDark = theme === 'dark';
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    api.groups
-      .list()
-      .then(setGroups)
-      .catch((err) => {
-        setGroups([]);
-        setError(err instanceof Error ? err.message : 'Couldn\'t load groups');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  // Filter groups based on search query
+  const filteredGroups = groups.filter(group =>
+    group.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   useEffect(() => { load(); }, [load]);
 
-  const allGroups = groups.map((g, i) => ({
-    ...g,
-    members: g.memberCount,
-    balance: 0,
-    color: COLORS[i % COLORS.length],
-  })).filter((g) => !searchQuery || g.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const displayGroups = activeTab === 'active' ? filteredGroups : filteredRecentGroups;
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
@@ -54,7 +43,7 @@ export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
         </div>
 
         {/* Search Bar */}
-        <div className="relative">
+        <div className="relative mb-4">
           <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-400" />
           <input
             type="text"

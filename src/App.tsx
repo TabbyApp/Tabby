@@ -4,9 +4,7 @@ import { SplashScreen } from './components/SplashScreen';
 import { LoginSignup } from './components/LoginSignup';
 import { LandingPage } from './components/LandingPage';
 import { GroupsPage } from './components/GroupsPage';
-import { GroupDetailPage } from './components/GroupDetailPage';
 import { ActivityPage } from './components/ActivityPage';
-import { CreateExpensePage } from './components/CreateExpensePage';
 import { AccountPage } from './components/AccountPage';
 import { SettingsPage } from './components/SettingsPage';
 import { VirtualWalletPage } from './components/VirtualWalletPage';
@@ -34,8 +32,7 @@ export type PageState = {
 const PERSISTENT_TABS = new Set<PageType>(['home', 'groups', 'activity']);
 
 export default function App() {
-  const [showSplash, setShowSplash] = useState(true);
-  const { user } = useAuth();
+  const { user, loading: authLoading, login, signup, logout } = useAuth();
   const isAuthenticated = !!user;
   const [pageState, setPageState] = useState<PageState>({ page: 'home' });
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -75,12 +72,117 @@ export default function App() {
         return n;
       });
     }
+    loadDashboard();
+  }, [user, loadDashboard]);
+
+  // Open accept-invite from URL (?invite=TOKEN or #invite/TOKEN)
+  useEffect(() => {
+    if (!user) return;
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromQuery = params.get('invite') || params.get('token');
+    const hash = window.location.hash.slice(1);
+    const tokenFromHash = hash.startsWith('invite/') ? hash.replace('invite/', '') : null;
+    const token = tokenFromQuery || tokenFromHash;
+    if (token) {
+      setAcceptInviteToken(token);
+      setCurrentPage('acceptInvite');
+    }
+  }, [user]);
+
+  const [notifications, setNotifications] = useState([
+    { id: 1, type: 'invite', title: 'Group Invitation', message: 'Sarah Mitchell invited you to Weekend Brunch Club', time: '5m ago', read: false },
+    { id: 2, type: 'receipt', title: 'New Receipt', message: 'Mike added a receipt to Lunch Squad for $45.80', time: '2h ago', read: false },
+    { id: 3, type: 'payment', title: 'Payment Processed', message: 'Your payment of $15.50 to Lunch Squad was successful', time: '1d ago', read: true },
+    { id: 4, type: 'group', title: 'Group Update', message: 'Emma Davis joined Office Lunch', time: '2d ago', read: true },
+  ]);
+
+  const acceptInvite = (token: string) => {
+    setAcceptInviteToken(token);
+    setCurrentPage('acceptInvite');
+  };
+
+  const declineInviteByToken = (token: string) => {
+    api.invites.decline(token).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {});
+  };
+
+  const unreadNotificationCount = notifications.filter(n => !n.read).length;
+
+  const deleteGroup = (groupId: string) => {
+    const groupToDelete = groups.find(g => g.id === groupId);
+    if (groupToDelete) {
+      setRecentGroups(prev => [...prev, { ...groupToDelete, deletedAt: new Date() }]);
+    }
+    setGroups(prev => prev.filter(g => g.id !== groupId));
+    api.groups.delete(groupId).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {
+      loadDashboard(); // Revert UI on failure
+    });
+  };
+
+  const leaveGroup = (groupId: string) => {
+    setGroups(prev => prev.filter(g => g.id !== groupId));
+    api.groups.leave(groupId).then(() => {
+      invalidateDashboardCache();
+      loadDashboard();
+    }).catch(() => {
+      loadDashboard(); // Revert UI on failure
+    });
+  };
+
+  const addGroup = async (name: string, memberEmails: string[]): Promise<string> => {
+    const group = await api.groups.create(name, []);
+    await Promise.all(
+      memberEmails.filter((e) => e.trim()).map((email) => api.groups.createInvite(group.id, email.trim().toLowerCase()).catch(() => {}))
+    );
+    invalidateDashboardCache();
+    loadDashboard();
+    return group.id;
+  };
+
+  // Determine actual theme based on preference
+  const theme = themePreference === 'system' 
+    ? 'light' // In real app, this would check window.matchMedia('(prefers-color-scheme: dark)').matches
+    : themePreference;
+
+  const handleNavigate = (page: PageType, groupId?: string | number) => {
+    setPageHistory(prev => [...prev, currentPage]);
+    setCurrentPage(page);
+    const id = groupId !== undefined ? String(groupId) : null;
+    if (id !== null) {
+      setSelectedGroupId(id);
+      if (page === 'receiptScan') {
+        setProcessingGroupId(id);
+      }
+    }
+  };
+
+  const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
+    setThemePreference(newTheme);
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setCurrentPage('home');
+    setPageHistory([]);
+    setGroups([]);
+    setPendingInvites([]);
+    setAcceptInviteToken(null);
+  };
+
+  const handleUpgradeToPro = (duration: '1week' | '1month' | '6months' | '1year') => {
+    // In real app, this would process payment
+    console.log(`Upgrading to Pro for ${duration}`);
+    setAccountType('pro');
   };
 
   const currentPage = pageState.page;
 
   return (
-    <ErrorBoundary>
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-black'}`}>
       <div className={`mx-auto max-w-[430px] h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-[#F2F2F7]'} relative overflow-hidden`}>
         {/* iOS Status Bar */}
@@ -105,6 +207,12 @@ export default function App() {
 
         {showSplash ? (
           <SplashScreen onComplete={() => setShowSplash(false)} />
+        ) : authLoading ? (
+          <div className="flex items-center justify-center h-[calc(100vh-48px-24px)]">
+            <div className="w-8 h-8 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : showForgotPassword ? (
+          <ForgotPasswordPage onNavigate={handleNavigate} onBack={() => setShowForgotPassword(false)} theme={theme} />
         ) : !isAuthenticated ? (
           <LoginSignup onAuthenticate={() => {}} />
         ) : !user?.bank_linked ? (
@@ -150,6 +258,7 @@ export default function App() {
             {currentPage === 'processing' && (
               <ProcessingPaymentPage groupId={pageState.groupId} transactionId={pageState.transactionId} splits={pageState.splits ?? []} currentUserId={user?.id} onNavigate={setCurrentPage} theme={theme} />
             )}
+            {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
           </>
         )}
 
@@ -157,6 +266,5 @@ export default function App() {
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-black rounded-full opacity-40" />
       </div>
     </div>
-    </ErrorBoundary>
   );
 }

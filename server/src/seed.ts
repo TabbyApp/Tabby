@@ -10,6 +10,10 @@ const TEST_EMAIL = 'test@tabby.com';
 const TEST_PASSWORD = 'password123';
 const TEST_NAME = 'Test User';
 
+const TEST2_EMAIL = 'test2@tabby.com';
+const TEST2_PASSWORD = 'password123';
+const TEST2_NAME = 'Test User 2';
+
 function genId() {
   return crypto.randomUUID();
 }
@@ -68,9 +72,29 @@ async function seed() {
     console.log(`  Created group: ${g.name} (card •••• ${cardLastFour})`);
   }
 
-  console.log('\nTest account ready:');
-  console.log(`  Email: ${TEST_EMAIL}`);
-  console.log(`  Password: ${TEST_PASSWORD}`);
+  // Second test user (for testing invites locally)
+  let user2Id: string | undefined;
+  const existing2 = db.prepare('SELECT id FROM users WHERE email = ?').get(TEST2_EMAIL) as { id: string } | undefined;
+  if (!existing2) {
+    user2Id = genId();
+    const passwordHash2 = await bcrypt.hash(TEST2_PASSWORD, 10);
+    db.prepare('INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)').run(
+      user2Id,
+      TEST2_EMAIL,
+      passwordHash2,
+      TEST2_NAME
+    );
+    db.prepare(
+      'INSERT INTO payment_methods (id, user_id, type, last_four, brand) VALUES (?, ?, ?, ?, ?)'
+    ).run(genId(), user2Id, 'card', '5555', 'Visa');
+    console.log('Created second test user:', TEST2_EMAIL);
+  }
+
+  console.log('\nTest accounts ready:');
+  console.log(`  ${TEST_EMAIL} / ${TEST_PASSWORD}`);
+  console.log(`  ${TEST2_EMAIL} / ${TEST2_PASSWORD}`);
+  console.log('\nTo test invites: log in as test@tabby.com, create a group, tap Invite and copy the link.');
+  console.log('Open the link in an Incognito window and log in as test2@tabby.com to accept.');
 }
 
 seed().catch(console.error);

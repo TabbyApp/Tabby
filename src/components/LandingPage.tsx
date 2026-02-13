@@ -2,38 +2,30 @@ import { useState, useEffect, useCallback } from 'react';
 import { User, CreditCard, Users, Plus, ArrowRight, Receipt } from 'lucide-react';
 import { ProfileSheet } from './ProfileSheet';
 import { TabbyCatLogo } from './TabbyCatLogo';
-import { useAuth } from '../contexts/AuthContext';
-import { api } from '../lib/api';
-import type { PageType, PageState } from '../App';
+import { PageType } from '../App';
 
 interface LandingPageProps {
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
+  groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
+  unreadNotificationCount: number;
+  pendingInvites: Array<{ id: string; token: string; groupName: string; inviterName: string; members: number }>;
+  acceptInvite: (token: string) => void;
+  declineInvite: (token: string) => void;
 }
 
-export function LandingPage({ onNavigate, theme }: LandingPageProps) {
+export function LandingPage({ onNavigate, theme, groups, unreadNotificationCount, pendingInvites, acceptInvite, declineInvite }: LandingPageProps) {
   const [showProfileSheet, setShowProfileSheet] = useState(false);
-  const [groups, setGroups] = useState<{ id: string; name: string; memberCount: number; cardLastFour: string | null }[]>([]);
-  const [cards, setCards] = useState<{ groupId: string; groupName: string; cardLastFour: string | null; groupTotal: number }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { user, logout } = useAuth();
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    Promise.all([api.groups.list(), api.groups.virtualCards()])
-      .then(([gList, cList]) => {
-        setGroups(gList);
-        setCards(cList);
-      })
-      .catch((err) => {
-        setGroups([]);
-        setCards([]);
-        setError(err instanceof Error ? err.message : 'Couldn\'t load data');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  // Show only first 2 groups on landing page
+  const activeGroups = groups.slice(0, 2).map(group => ({
+    id: group.id,
+    name: group.name,
+    members: group.members,
+    lastActive: '2h ago', // Mock data
+    amount: group.balance,
+    color: group.color,
+  }));
 
   useEffect(() => { load(); }, [load]);
 
@@ -50,14 +42,19 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
           </div>
           <div>
             <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Tabby</h1>
-            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-purple-600'}`}>Awkwardness Ends Here</p>
           </div>
         </div>
         <button
           onClick={() => setShowProfileSheet(true)}
           className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center text-white shadow-md active:scale-95 transition-transform"
         >
-          <User size={20} strokeWidth={2.5} />
+          <Bell size={20} className={isDark ? 'text-white' : 'text-slate-800'} strokeWidth={2.5} />
+          {/* Notification Badge */}
+          {unreadNotificationCount > 0 && (
+            <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+              <span className="text-white text-[10px] font-bold">{unreadNotificationCount}</span>
+            </div>
+          )}
         </button>
       </div>
 
@@ -143,12 +140,12 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
                       <Users size={24} className="text-white" strokeWidth={2.5} />
                     </div>
                     <div>
-                      <h3 className={`font-bold text-[17px] ${isDark ? 'text-white' : 'text-slate-900'}`}>{group.name}</h3>
-                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{group.memberCount} members</p>
+                      <h3 className={`font-bold text-[17px] ${isDark ? 'text-white' : 'text-slate-900'} text-left`}>{group.name}</h3>
+                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} text-left`}>{group.members} members • {group.lastActive}</p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{group.cardLastFour ? `•••• ${group.cardLastFour}` : '—'}</p>
+                    <p className={`font-bold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>${group.amount.toFixed(2)}</p>
                     <ArrowRight size={18} className={`${isDark ? 'text-slate-600' : 'text-slate-300'} ml-auto`} />
                   </div>
                 </div>
@@ -156,6 +153,59 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
             ))}
           </div>
         </div>
+
+        {/* Pending Invites */}
+        {pendingInvites.length > 0 && (
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ delay: 0.5, duration: 0.5 }}
+            className="mb-6"
+          >
+            <h2 className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-3 px-1`}>
+              Pending Invites
+            </h2>
+            <div className="space-y-3">
+              {pendingInvites.map((invite, index) => (
+                <motion.div
+                  key={invite.id}
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: 0.6 + index * 0.1, duration: 0.4 }}
+                  className={`w-full ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
+                >
+                  <div className="flex items-start gap-4 mb-4">
+                    <div 
+                      className="w-14 h-14 rounded-[18px] flex items-center justify-center shadow-lg"
+                      style={{ backgroundColor: '#FF6F61' }}
+                    >
+                      <Users size={24} className="text-white" strokeWidth={2.5} />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className={`font-bold text-[17px] ${isDark ? 'text-white' : 'text-slate-900'} mb-1`}>{invite.groupName}</h3>
+                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Invited by {invite.inviterName}</p>
+                      <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'} mt-1`}>{invite.members} members</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => acceptInvite(invite.token)}
+                      className="flex-1 bg-green-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform"
+                    >
+                      Accept
+                    </button>
+                    <button
+                      onClick={() => declineInvite(invite.token)}
+                      className={`flex-1 ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* Recent Activity */}
         <div>
@@ -177,7 +227,7 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
           onClick={() => onNavigate('create')}
           className="w-[68px] h-[68px] bg-gradient-to-r from-purple-600 to-indigo-600 rounded-2xl shadow-lg flex items-center justify-center active:scale-95 transition-transform"
         >
-          <Plus size={36} className="text-white" strokeWidth={2.5} />
+          <Plus size={28} className="text-white" strokeWidth={2.5} />
         </button>
       </div>
 
@@ -203,6 +253,16 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
               </div>
               <span className="text-[11px] text-gray-500 font-medium">Activity</span>
             </button>
+
+            <button 
+              onClick={() => setShowProfileSheet(true)}
+              className="flex flex-col items-center gap-1.5 min-w-[70px]"
+            >
+              <div className={`w-11 h-11 rounded-[16px] ${isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center`}>
+                <User size={22} className="text-gray-500" strokeWidth={2.5} />
+              </div>
+              <span className="text-[11px] text-gray-500 font-medium">Profile</span>
+            </button>
           </div>
         </div>
       </div>
@@ -214,8 +274,7 @@ export function LandingPage({ onNavigate, theme }: LandingPageProps) {
           onNavigateToAccount={() => onNavigate('account')}
           onNavigateToSettings={() => onNavigate('settings')}
           onNavigateToWallet={() => onNavigate('wallet')}
-          onLogout={logout}
-          user={user}
+          theme={theme}
         />
       )}
     </div>

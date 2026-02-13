@@ -1,7 +1,7 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { Check, CreditCard, Users, Loader } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { PageType, PageState } from '../App';
+import { PageType } from '../App';
 
 interface ProcessingPaymentPageProps {
   groupId?: string;
@@ -10,6 +10,13 @@ interface ProcessingPaymentPageProps {
   currentUserId?: string | null;
   onNavigate: (target: PageType | PageState) => void;
   theme: 'light' | 'dark';
+  groupId: string | null;
+  accountType: 'standard' | 'pro';
+  deleteGroup: (groupId: string) => void;
+  receiptData: {
+    members: Array<{ id: number; name: string; amount: number; avatar: string }>;
+    total: number;
+  } | null;
 }
 
 const AVATARS = ['👤', '👩', '👨', '👧', '🙂'];
@@ -18,27 +25,36 @@ export function ProcessingPaymentPage({ groupId, transactionId, splits, currentU
   const isDark = theme === 'dark';
   const [step, setStep] = useState<'processing' | 'success'>('processing');
 
-  const members = splits.map((s, i) => ({
-    id: s.user_id,
-    name: s.user_id === currentUserId ? 'You' : s.name,
-    amount: s.amount,
-    avatar: AVATARS[i % AVATARS.length],
-  }));
-
   useEffect(() => {
-    const timer = setTimeout(() => setStep('success'), 2500);
+    const timer = setTimeout(() => {
+      setStep('success');
+    }, 2500);
+
     const redirectTimer = setTimeout(() => {
       if (groupId) {
         onNavigate({ page: 'groupDetail', groupId });
       } else {
         onNavigate('activity');
       }
-    }, 4500);
+      // Navigate to home after deletion
+      onNavigate('home');
+    }, 4000); // Back to 4 seconds total
+
     return () => {
       clearTimeout(timer);
       clearTimeout(redirectTimer);
     };
-  }, [onNavigate, groupId]);
+  }, [onNavigate, accountType, groupId, deleteGroup]);
+
+  // Use actual receipt data if available, otherwise use fallback mock data
+  const members = receiptData?.members || [
+    { id: 1, name: 'You', amount: 18.50, avatar: '👤' },
+    { id: 2, name: 'Sarah', amount: 15.20, avatar: '👩' },
+    { id: 3, name: 'Mike', amount: 22.10, avatar: '👨' },
+    { id: 4, name: 'Emma', amount: 18.20, avatar: '👧' },
+  ];
+
+  const total = receiptData?.total || members.reduce((sum, m) => sum + m.amount, 0);
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'} px-5`}>
@@ -72,9 +88,7 @@ export function ProcessingPaymentPage({ groupId, transactionId, splits, currentU
 
             {/* Member List with Loading States */}
             <div className="space-y-3 max-w-sm mx-auto">
-              {members.length === 0 ? (
-                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Processing...</p>
-              ) : members.map((member, index) => (
+              {members.map((member, index) => (
                 <motion.div
                   key={member.id}
                   initial={{ x: -20, opacity: 0 }}
@@ -155,11 +169,11 @@ export function ProcessingPaymentPage({ groupId, transactionId, splits, currentU
                 <div className="flex items-center gap-2">
                   <Users size={20} className={isDark ? 'text-slate-400' : 'text-slate-500'} />
                   <p className={`font-medium ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-                    {members.length} {members.length === 1 ? 'member' : 'members'} charged
+                    {members.length} members charged
                   </p>
                 </div>
                 <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                  ${members.reduce((sum, m) => sum + m.amount, 0).toFixed(2)}
+                  ${total.toFixed(2)}
                 </p>
               </div>
               <div className={`border-t ${isDark ? 'border-slate-700' : 'border-gray-200'} pt-4 space-y-2`}>
@@ -185,7 +199,7 @@ export function ProcessingPaymentPage({ groupId, transactionId, splits, currentU
               transition={{ delay: 1 }}
               className={`mt-6 text-sm ${isDark ? 'text-slate-500' : 'text-slate-400'}`}
             >
-              {groupId ? 'Returning to group...' : 'Returning to home...'}
+              Returning to home...
             </motion.p>
           </motion.div>
         )}

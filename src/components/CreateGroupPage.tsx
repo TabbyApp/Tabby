@@ -1,26 +1,25 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, UserPlus, X, Check } from 'lucide-react';
 import { useState } from 'react';
-import { api } from '../lib/api';
-import type { PageType, PageState } from '../App';
+import { PageType } from '../App';
 
 interface CreateGroupPageProps {
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: string | number) => void;
   theme: 'light' | 'dark';
+  addGroup: (name: string, memberEmails: string[]) => Promise<string>;
 }
 
-export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
+export function CreateGroupPage({ onNavigate, theme, addGroup }: CreateGroupPageProps) {
   const isDark = theme === 'dark';
   const [groupName, setGroupName] = useState('');
   const [members, setMembers] = useState<string[]>([]);
   const [emailInput, setEmailInput] = useState('');
   const [step, setStep] = useState<'create' | 'success'>('create');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [groupLink, setGroupLink] = useState('');
 
   const addMember = () => {
-    if (emailInput.trim() && !members.includes(emailInput.trim().toLowerCase())) {
-      setMembers([...members, emailInput.trim().toLowerCase()]);
+    if (emailInput.trim() && !members.includes(emailInput.trim())) {
+      setMembers([...members, emailInput.trim()]);
       setEmailInput('');
     }
   };
@@ -30,36 +29,87 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
   };
 
   const createGroup = async () => {
-    if (!groupName.trim()) return;
-    setError('');
-    setLoading(true);
+    if (groupName.trim()) {
+      try {
+        const newGroupId = await addGroup(groupName, members);
+        setGroupLink(`${typeof window !== 'undefined' ? window.location.origin : ''}/?invite=...`);
+        setStep('success');
+      } catch (_) {
+        // Error handled by App / API
+      }
+    }
+  };
+
+  const copyLink = () => {
+    // Try modern clipboard API first
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(groupLink)
+        .then(() => {
+          console.log('Link copied to clipboard');
+          // In real app, show a toast notification
+        })
+        .catch((err) => {
+          console.error('Failed to copy:', err);
+          // Fallback to old method
+          fallbackCopyTextToClipboard(groupLink);
+        });
+    } else {
+      // Fallback for older browsers
+      fallbackCopyTextToClipboard(groupLink);
+    }
+  };
+
+  const fallbackCopyTextToClipboard = (text: string) => {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.top = '0';
+    textArea.style.left = '0';
+    textArea.style.width = '2em';
+    textArea.style.height = '2em';
+    textArea.style.padding = '0';
+    textArea.style.border = 'none';
+    textArea.style.outline = 'none';
+    textArea.style.boxShadow = 'none';
+    textArea.style.background = 'transparent';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
     try {
-      const group = await api.groups.create(groupName.trim(), members);
-      setStep('success');
-      setTimeout(() => {
-        onNavigate({ page: 'groupDetail', groupId: group.id });
-      }, 2000);
+      document.execCommand('copy');
+      console.log('Link copied using fallback method');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create group');
-    } finally {
-      setLoading(false);
+      console.error('Fallback: Unable to copy', err);
+    }
+    document.body.removeChild(textArea);
+  };
+
+  const shareLink = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: `Join ${groupName} on Tabby`,
+        text: `Join my payment group on Tabby!`,
+        url: groupLink,
+      });
+    } else {
+      copyLink();
     }
   };
 
   if (step === 'success') {
     return (
-      <div className={`h-[calc(100vh-48px-24px)] flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+      <div className={`h-[calc(100vh-48px-24px)] flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ type: 'spring', stiffness: 200 }}
-          className="text-center px-5"
+          className="text-center px-5 w-full max-w-md"
         >
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-            className="w-24 h-24 rounded-full bg-green-500 flex items-center justify-center mx-auto mb-6"
+            className="w-24 h-24 rounded-full bg-gradient-to-r from-violet-600 to-purple-600 flex items-center justify-center mx-auto mb-6 shadow-xl"
           >
             <Check size={48} className="text-white" strokeWidth={3} />
           </motion.div>
@@ -75,17 +125,57 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
-            className={isDark ? 'text-slate-400' : 'text-slate-600'}
+            className={`${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}
           >
-            Your virtual card is being generated...
+            Share this link with your friends to join
           </motion.p>
+          
+          {/* Share Link */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.6 }}
+            className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-4 mb-4`}
+          >
+            <div className="flex items-center gap-2">
+              <div className={`flex-1 ${isDark ? 'bg-slate-700' : 'bg-slate-100'} rounded-xl px-3 py-2 text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'} font-mono truncate`}>
+                {groupLink}
+              </div>
+              <button
+                onClick={copyLink}
+                className="px-4 py-2 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-medium active:scale-95 transition-transform"
+              >
+                Copy
+              </button>
+            </div>
+          </motion.div>
+
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.7 }}
+            onClick={shareLink}
+            className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-2xl font-semibold active:scale-[0.98] transition-transform shadow-xl mb-3"
+          >
+            Share Link
+          </motion.button>
+
+          <motion.button
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.8 }}
+            onClick={() => onNavigate('groups')}
+            className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700'} py-4 rounded-2xl font-semibold active:scale-[0.98] transition-transform`}
+          >
+            View All Groups
+          </motion.button>
         </motion.div>
       </div>
     );
   }
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
       {/* Header */}
       <motion.div 
         initial={{ y: -20, opacity: 0 }}
@@ -94,7 +184,7 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
       >
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => onNavigate('create')}
+            onClick={() => onNavigate('groups')}
             className={`w-9 h-9 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center active:scale-95 transition-transform`}
           >
             <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-slate-800'} strokeWidth={2.5} />
@@ -181,7 +271,6 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
           )}
         </motion.div>
 
-        {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
         {/* Info Box */}
         <motion.div
           initial={{ y: 20, opacity: 0 }}
@@ -204,16 +293,16 @@ export function CreateGroupPage({ onNavigate, theme }: CreateGroupPageProps) {
       >
         <button
           onClick={createGroup}
-          disabled={!groupName.trim() || loading}
+          disabled={!groupName.trim()}
           className={`w-full py-4 rounded-xl font-semibold shadow-lg transition-all ${
-            groupName.trim() && !loading
+            groupName.trim()
               ? 'bg-gradient-to-r from-slate-600 to-blue-500 text-white active:scale-[0.98]'
               : isDark 
                 ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
           }`}
         >
-          {loading ? 'Creating...' : 'Create Group & Generate Card'}
+          Create Group & Generate Card
         </button>
       </motion.div>
     </div>
