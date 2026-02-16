@@ -7,7 +7,7 @@ The Tabby frontend is a React 18 single-page application built with Vite and Typ
 ## Project Structure
 
 ```
-src/
+frontend/
 ├── main.tsx                    # Entry point — renders AuthProvider → App
 ├── App.tsx                     # Page router, theme, auth flow, navigation
 ├── styles/
@@ -194,7 +194,7 @@ const { user, loading, login, signup, logout, setUser } = useAuth();
 
 ### API Client
 
-All API calls go through `src/lib/api.ts`:
+All API calls go through `frontend/lib/api.ts`:
 
 ```typescript
 import { api } from '../lib/api';
@@ -347,7 +347,7 @@ Invite links use the format `${origin}/join/${inviteToken}`. When a user opens s
 
 ## Adding a New Page
 
-1. Create `src/components/MyNewPage.tsx`
+1. Create `frontend/components/MyNewPage.tsx`
 2. Add the page type to `PageType` or `PageState` in `App.tsx`
 3. Add rendering logic in the `App` component's JSX
 4. Pass `onNavigate` and `theme` as props

@@ -71,7 +71,7 @@ Tabby/
 │   │       └── transactions.ts    # Transaction lifecycle, finalization, settlement
 │   ├── package.json
 │   └── tsconfig.json
-├── src/                           # Frontend React app
+├── frontend/                      # Frontend React app
 │   ├── main.tsx                   # App entry point
 │   ├── App.tsx                    # Router and page manager
 │   ├── styles/
