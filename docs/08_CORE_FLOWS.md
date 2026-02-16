@@ -8,8 +8,7 @@ This document walks through every major user flow in Tabby, step by step. Each f
 
 ### User Experience
 
-1. User taps **"+"** button on home screen → CreateExpensePage
-2. Taps **"Create Group"** → CreateGroupPage
+1. User taps **"+"** button on home screen → CreateGroupPage
 3. Enters group name (e.g., "Friday Dinner")
 4. Optionally adds member emails
 5. Taps **"Create"**
@@ -43,23 +42,20 @@ Frontend: CreateGroupPage
 
 ### User Experience
 
-1. User receives an invite link: `https://tabby.app/?invite=abc123def456`
+1. User receives an invite link: `https://tabby.app/join/TOKEN`
 2. Opens the link
 3. If not logged in: sees login/signup page → logs in
-4. If bank not linked: sees bank linking page → links bank
+4. If bank not linked: links bank from Account page
 5. Automatically joins the group and sees the GroupDetailPage
 
 ### Technical Flow
 
 ```
-App.tsx on mount:
+App routes to AcceptInvitePage when URL path is /join/TOKEN:
     │
-    ├── Read ?invite=TOKEN from URL
-    │   └── Store in sessionStorage (survives auth redirect)
+    ├── Extract token from URL path (/join/TOKEN)
     │
-    ├── After user is authenticated + bank_linked:
-    │   ├── Read token from sessionStorage
-    │   ├── api.groups.joinByToken(token)
+    ├── AcceptInvitePage calls api.groups.joinByToken(token)
     │   │   │
     │   │   ▼  Backend: POST /api/groups/join/:token
     │   │   1. Find group by invite_token
@@ -67,7 +63,6 @@ App.tsx on mount:
     │   │   3. INSERT into group_members (if not already)
     │   │   4. Return { groupId, groupName, joined: true }
     │   │
-    │   ├── Clear sessionStorage
     │   └── onNavigate({ page: 'groupDetail', groupId })
 ```
 
@@ -76,7 +71,7 @@ App.tsx on mount:
 On `GroupDetailPage`, the invite link is constructed client-side:
 
 ```typescript
-const inviteLink = `${window.location.origin}/?invite=${group.inviteToken}`;
+const inviteLink = `${window.location.origin}/join/${group.inviteToken}`;
 ```
 
 The QR code encodes this same URL using `qrcode.react`.
@@ -84,6 +79,8 @@ The QR code encodes this same URL using `qrcode.react`.
 ---
 
 ## 3. Even Split Payment
+
+EVEN_SPLIT is handled entirely on GroupDetailPage (no TransactionAllocationPage). GroupDetailPage creates transactions via `api.transactions.create()`, sets tip via `api.transactions.setTip()`, and finalizes via `api.transactions.finalize()`.
 
 ### User Experience
 
@@ -141,6 +138,7 @@ GroupDetailPage (Even Split):
     │   └── onNavigate({ page: 'processing', splits: allocations })
     │
     └── 4. ProcessingPaymentPage
+        ├── Calls api.transactions.settle(transactionId)
         ├── Show spinner for 2.5 seconds
         ├── Show success screen with breakdown
         └── Auto-redirect to group detail after 2 more seconds
@@ -222,7 +220,7 @@ GroupDetailPage (Full Control):
     │   │
     │   └── Navigate to ProcessingPaymentPage
     │
-    └── 5. ProcessingPaymentPage → Success
+    └── 5. ProcessingPaymentPage → Calls api.transactions.settle(), then success screen
 ```
 
 ### Item Split Calculation Details

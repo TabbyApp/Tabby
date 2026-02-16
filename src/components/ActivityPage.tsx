@@ -1,40 +1,76 @@
-import { ChevronLeft, Receipt } from 'lucide-react';
+import { motion } from 'motion/react';
+import { ChevronLeft, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { BottomNavigation } from './BottomNavigation';
+import { ProfileSheet } from './ProfileSheet';
+import { PageType } from '../App';
 import { api } from '../lib/api';
-import type { PageType, PageState } from '../App';
 
 interface ActivityPageProps {
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
-}
-
-function formatDate(iso: string) {
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
-  return d.toLocaleDateString();
 }
 
 export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
   const isDark = theme === 'dark';
-  const [activities, setActivities] = useState<{ id: string; transaction_id: string; amount: number; status: string; created_at: string; settled_at: string | null; group_id: string; group_name: string }[]>([]);
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
+  const [transactions, setTransactions] = useState<
+    { id: string; description: string; group: string; amount: number; date: string; type: 'paid' | 'received' }[]
+  >([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.transactions.activity()
-      .then(setActivities)
-      .catch(() => setActivities([]))
-      .finally(() => setLoading(false));
+    setLoading(true);
+    Promise.all([
+      api.transactions.activity().catch(() => []),
+      api.receipts.mySplits().catch(() => []),
+    ]).then(([activity, splits]) => {
+      const txItems = activity.map((a) => {
+        const date = new Date(a.created_at);
+        const now = new Date();
+        const diffH = Math.floor((now.getTime() - date.getTime()) / 3600000);
+        const timeAgo = diffH < 1 ? 'just now' : diffH < 24 ? `${diffH}h ago` : `${Math.floor(diffH / 24)}d ago`;
+        return {
+          id: a.id,
+          description: a.group_name,
+          group: a.group_name,
+          amount: a.amount,
+          date: timeAgo,
+          type: 'paid' as const,
+        };
+      });
+      const splitItems = splits.map((s) => {
+        const date = new Date(s.created_at);
+        const now = new Date();
+        const diffH = Math.floor((now.getTime() - date.getTime()) / 3600000);
+        const timeAgo = diffH < 1 ? 'just now' : diffH < 24 ? `${diffH}h ago` : `${Math.floor(diffH / 24)}d ago`;
+        return {
+          id: s.id,
+          description: s.group_name,
+          group: s.group_name,
+          amount: s.amount,
+          date: timeAgo,
+          type: (s.status === 'settled' ? 'paid' : 'paid') as 'paid' | 'received',
+        };
+      });
+      const combined = [...txItems, ...splitItems].sort((a, b) => {
+        // Sort by time string (newest first) - simplified
+        return 0;
+      });
+      setTransactions(combined.length > 0 ? combined : []);
+    }).finally(() => setLoading(false));
   }, []);
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
       {/* Header */}
-      <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}>
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}
+      >
         <div className="flex items-center gap-3">
-          <button
+          <button 
             onClick={() => onNavigate('home')}
             className={`w-9 h-9 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center active:scale-95 transition-transform`}
           >
@@ -42,42 +78,69 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
           </button>
           <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Activity</h1>
         </div>
-      </div>
+      </motion.div>
 
       {/* Activity List */}
-      <div className="flex-1 overflow-y-auto px-5 py-4" style={{ WebkitOverflowScrolling: 'touch' }}>
-        {loading && <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>Loading...</p>}
-        {!loading && activities.length === 0 && (
-          <div className={`rounded-xl p-8 text-center ${isDark ? 'bg-slate-800' : 'bg-white'}`}>
-            <Receipt size={40} className={`mx-auto mb-3 ${isDark ? 'text-slate-500' : 'text-slate-300'}`} />
-            <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No activity yet. Create a group, pay, and settle to see history here.</p>
-          </div>
-        )}
-        <div className="space-y-3">
-          {activities.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => onNavigate({ page: 'groupDetail', groupId: item.group_id })}
-              className={`w-full text-left ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm active:scale-[0.98] transition-transform`}
-            >
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center bg-purple-100">
-                  <Receipt size={20} className="text-purple-500" strokeWidth={2.5} />
-                </div>
-                <div className="flex-1">
-                  <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{item.group_name}</h3>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                    {formatDate(item.settled_at || item.created_at)} &middot; {item.status === 'SETTLED' ? 'Settled' : item.status}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-lg text-purple-600">${item.amount.toFixed(2)}</p>
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        {loading ? (
+          <div className="space-y-3 animate-pulse">
+            {[1, 2, 3].map(i => (
+              <div key={i} className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4`}>
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                  <div className="flex-1 space-y-2">
+                    <div className={`h-4 w-24 rounded ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                    <div className={`h-3 w-32 rounded ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
+                  </div>
+                  <div className={`h-5 w-16 rounded ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`} />
                 </div>
               </div>
-            </button>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : transactions.length === 0 ? (
+          <p className={`text-center mt-8 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No activity yet</p>
+        ) : (
+          <div className="space-y-3">
+            {transactions.map((transaction, index) => (
+              <motion.div
+                key={transaction.id}
+                initial={{ x: -6, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: index * 0.02, duration: 0.12 }}
+                className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+                    transaction.type === 'paid' ? 'bg-red-100' : 'bg-green-100'
+                  }`}>
+                    {transaction.type === 'paid' ? (
+                      <ArrowUpRight size={20} className="text-red-500" strokeWidth={2.5} />
+                    ) : (
+                      <ArrowDownLeft size={20} className="text-green-500" strokeWidth={2.5} />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <h3 className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{transaction.description}</h3>
+                    <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{transaction.group} • {transaction.date}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`font-bold text-lg ${
+                      transaction.type === 'paid' ? 'text-red-500' : 'text-green-500'
+                    }`}>
+                      {transaction.type === 'paid' ? '-' : '+'}${transaction.amount.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
       </div>
+
+      <BottomNavigation currentPage="activity" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
+      {showProfileSheet && (
+        <ProfileSheet onClose={() => setShowProfileSheet(false)} onNavigateToAccount={() => onNavigate('account')} onNavigateToSettings={() => onNavigate('settings')} onNavigateToWallet={() => onNavigate('wallet')} theme={theme} />
+      )}
     </div>
   );
 }

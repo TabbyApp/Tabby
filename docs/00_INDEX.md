@@ -56,3 +56,4 @@ npm run dev
 | `server/src/db.ts` | Database schema |
 | `server/src/routes/transactions.ts` | Transaction lifecycle |
 | `server/src/routes/groups.ts` | Group management |
+| `tsconfig.json` | TypeScript configuration |

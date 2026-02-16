@@ -37,7 +37,7 @@ Backend steps:
 Frontend steps:
 1. Store accessToken in localStorage via setAccessToken()
 2. Update AuthContext user state
-3. Navigate to LinkBankPage (if bank not linked) or Home
+3. Users can link their bank from the Account page
 ```
 
 ## Login Flow
@@ -283,17 +283,14 @@ if (token) {
 
 ## Invite Token Handling During Auth
 
-When a user opens an invite link but isn't logged in:
+When a user opens an invite link (format: `${origin}/join/TOKEN`):
 
 ```
-1. App loads with ?invite=TOKEN in URL
-2. Token saved to sessionStorage (survives page reload during auth)
-3. User logs in or signs up
-4. After bank_linked confirmed:
-   a. Read invite token from sessionStorage
-   b. Call api.groups.joinByToken(token)
-   c. Navigate to the joined group
-   d. Clear sessionStorage
+1. App loads with /join/TOKEN in the URL path
+2. User is routed to AcceptInvitePage with the token
+3. If not logged in: user logs in or signs up first
+4. AcceptInvitePage calls api.groups.joinByToken(token) when user accepts
+5. On success, user is navigated to the joined group
 ```
 
 ## Flowchart: Complete Auth State Machine
@@ -328,10 +325,10 @@ When a user opens an invite link but isn't logged in:
         └──────┬──────────────┬───────────┘
            Yes │              │ No
                │              │
-        ┌──────▼───┐   ┌─────▼──────────┐
-        │ Check    │   │ Show LinkBank   │
-        │ Invite   │   │ Page            │
-        │ Token    │   └─────┬───────────┘
+        ┌──────▼───┐   ┌─────▼──────────────┐
+        │ Check    │   │ Link bank from     │
+        │ Invite   │   │ Account page       │
+        │ Token    │   └─────┬──────────────┘
         └──┬───────┘         │ After linking
            │                 │
            ▼                 ▼

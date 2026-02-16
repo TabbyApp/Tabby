@@ -137,6 +137,16 @@ export const api = {
       request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string }[]; cardLastFour: string | null; inviteToken: string | null }>(
         `/groups/${groupId}`
       ),
+    /** Batch fetch group details - 1 request instead of N (avoids connection queueing) */
+    getBatch: (groupIds: string[]) =>
+      request<Record<string, {
+        id: string; name: string; created_by: string;
+        members: { id: string; name: string; email: string }[];
+        cardLastFour: string | null; inviteToken: string;
+        receipts: { id: string; group_id: string; status: string; total: number | null; created_at: string; splits?: unknown[] }[];
+      }>>(
+        `/groups/batch?ids=${encodeURIComponent(groupIds.join(','))}`
+      ),
     joinByToken: (token: string) =>
       request<{ groupId: string; groupName: string; joined: boolean }>(`/groups/join/${token}`, { method: 'POST' }),
     deleteGroup: (groupId: string) =>

@@ -1,23 +1,27 @@
 import { motion } from 'motion/react';
-import { ChevronLeft, Moon, Sun, Bell, Lock, HelpCircle, LogOut, Trash2 } from 'lucide-react';
+import { ChevronLeft, Bell, Lock, Eye, HelpCircle, Moon, Sun, Trash2, LogOut, Crown, Palette } from 'lucide-react';
 import { useState } from 'react';
+import { BottomNavigation } from './BottomNavigation';
+import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
 
 interface SettingsPageProps {
-  onNavigate: (page: PageType) => void;
+  onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
-  onThemeChange: (theme: 'light' | 'dark') => void;
+  onThemeChange: (theme: 'light' | 'dark' | 'system') => void;
+  onLogout: () => void;
 }
 
-export function SettingsPage({ onNavigate, theme, onThemeChange }: SettingsPageProps) {
+export function SettingsPage({ onNavigate, theme, onThemeChange, onLogout }: SettingsPageProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
   const isDark = theme === 'dark';
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
       {/* Header */}
       <motion.div 
-        initial={{ y: -20, opacity: 0 }}
+        initial={{ opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}
       >
@@ -35,11 +39,35 @@ export function SettingsPage({ onNavigate, theme, onThemeChange }: SettingsPageP
       {/* Settings List */}
       <div className="flex-1 overflow-y-auto px-5 py-6">
         <motion.div
-          initial={{ y: 20, opacity: 0 }}
+          initial={{ y: 6, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.1 }}
+          transition={{ duration: 0.12 }}
           className="space-y-6"
         >
+          {/* Pro Account */}
+          <div>
+            <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>
+              Account
+            </h2>
+            <div className={`${isDark ? 'bg-gradient-to-br from-purple-900 to-indigo-900' : 'bg-gradient-to-br from-purple-600 to-indigo-600'} rounded-xl overflow-hidden shadow-sm relative`}>
+              <button 
+                onClick={() => onNavigate('proAccount')}
+                className="w-full flex items-center gap-3 px-4 py-4 active:opacity-80 transition-opacity"
+              >
+                <div className="w-10 h-10 rounded-full bg-yellow-400 flex items-center justify-center">
+                  <Crown size={20} className="text-purple-900" fill="currentColor" />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="font-bold text-white">Tabby Pro</p>
+                  <p className="text-xs text-purple-200">Unlock premium features</p>
+                </div>
+                <div className="bg-white/20 px-3 py-1.5 rounded-full">
+                  <p className="text-xs font-bold text-white">Upgrade</p>
+                </div>
+              </button>
+            </div>
+          </div>
+
           {/* Appearance */}
           <div>
             <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>
@@ -47,37 +75,16 @@ export function SettingsPage({ onNavigate, theme, onThemeChange }: SettingsPageP
             </h2>
             <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
               <button 
-                onClick={() => onThemeChange('light')}
-                className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}`}
-              >
-                <div className={`w-10 h-10 rounded-full ${theme === 'light' ? 'bg-blue-100' : isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center`}>
-                  <Sun size={20} className={theme === 'light' ? 'text-blue-500' : 'text-gray-500'} />
-                </div>
-                <div className="flex-1 text-left">
-                  <p className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>Light Mode</p>
-                </div>
-                {theme === 'light' && (
-                  <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
-                    <div className="w-2 h-2 bg-white rounded-full" />
-                  </div>
-                )}
-              </button>
-              
-              <button 
-                onClick={() => onThemeChange('dark')}
+                onClick={() => onNavigate('appearanceSettings')}
                 className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors`}
               >
-                <div className={`w-10 h-10 rounded-full ${theme === 'dark' ? 'bg-blue-100' : isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center`}>
-                  <Moon size={20} className={theme === 'dark' ? 'text-blue-500' : 'text-gray-500'} />
+                <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-purple-100'} flex items-center justify-center`}>
+                  <Palette size={20} className="text-purple-500" />
                 </div>
                 <div className="flex-1 text-left">
-                  <p className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>Dark Mode</p>
+                  <p className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>Theme</p>
+                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Customize app appearance</p>
                 </div>
-                {theme === 'dark' && (
-                  <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
-                    <div className="w-2 h-2 bg-white rounded-full" />
-                  </div>
-                )}
               </button>
             </div>
           </div>
@@ -88,7 +95,10 @@ export function SettingsPage({ onNavigate, theme, onThemeChange }: SettingsPageP
               Preferences
             </h2>
             <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
-              <button className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
+              <button 
+                onClick={() => onNavigate('notificationsSettings')}
+                className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}`}
+              >
                 <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-purple-100'} flex items-center justify-center`}>
                   <Bell size={20} className="text-purple-500" />
                 </div>
@@ -98,7 +108,10 @@ export function SettingsPage({ onNavigate, theme, onThemeChange }: SettingsPageP
                 </div>
               </button>
               
-              <button className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors`}>
+              <button 
+                onClick={() => onNavigate('privacySettings')}
+                className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors`}
+              >
                 <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-green-100'} flex items-center justify-center`}>
                   <Lock size={20} className="text-green-500" />
                 </div>
@@ -116,7 +129,10 @@ export function SettingsPage({ onNavigate, theme, onThemeChange }: SettingsPageP
               Support
             </h2>
             <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
-              <button className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors`}>
+              <button 
+                onClick={() => onNavigate('helpSupport')}
+                className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors`}
+              >
                 <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-blue-100'} flex items-center justify-center`}>
                   <HelpCircle size={20} className="text-blue-500" />
                 </div>
@@ -147,7 +163,10 @@ export function SettingsPage({ onNavigate, theme, onThemeChange }: SettingsPageP
                 </div>
               </button>
 
-              <button className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors`}>
+              <button 
+                onClick={onLogout}
+                className={`w-full flex items-center gap-3 px-4 py-4 ${isDark ? 'active:bg-slate-700' : 'active:bg-gray-100'} transition-colors`}
+              >
                 <div className="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center">
                   <LogOut size={20} className="text-orange-500" />
                 </div>
@@ -197,6 +216,25 @@ export function SettingsPage({ onNavigate, theme, onThemeChange }: SettingsPageP
             </div>
           </motion.div>
         </>
+      )}
+
+      {/* Bottom Navigation */}
+      <BottomNavigation
+        currentPage="settings"
+        onNavigate={onNavigate}
+        onProfileClick={() => setShowProfileSheet(true)}
+        theme={theme}
+      />
+
+      {/* Profile Sheet */}
+      {showProfileSheet && (
+        <ProfileSheet 
+          onClose={() => setShowProfileSheet(false)} 
+          onNavigateToAccount={() => onNavigate('account')}
+          onNavigateToSettings={() => onNavigate('settings')}
+          onNavigateToWallet={() => onNavigate('wallet')}
+          theme={theme}
+        />
       )}
     </div>
   );

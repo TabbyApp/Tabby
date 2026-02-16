@@ -1,52 +1,49 @@
-import { ChevronLeft, Users, Plus, Search } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
-import { api } from '../lib/api';
-import type { PageType, PageState } from '../App';
+import { motion } from 'motion/react';
+import { ChevronLeft, Users, Plus, Search, Clock, Archive } from 'lucide-react';
+import { useState } from 'react';
+import { BottomNavigation } from './BottomNavigation';
+import { ProfileSheet } from './ProfileSheet';
+import { PageType } from '../App';
 
 interface GroupsPageProps {
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
+  groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
+  recentGroups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string; deletedAt: Date }>;
+  accountType: 'standard' | 'pro';
+  deleteGroup: (groupId: string) => void;
+  leaveGroup: (groupId: string) => void;
+  currentUserId: string;
 }
 
-const COLORS = ['from-blue-400 to-blue-600', 'from-purple-400 to-purple-600', 'from-green-400 to-green-600', 'from-orange-400 to-orange-600'];
-
-export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
+export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountType }: GroupsPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [groups, setGroups] = useState<{ id: string; name: string; memberCount: number; cardLastFour: string | null }[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'active' | 'recent'>('active');
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
   const isDark = theme === 'dark';
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    api.groups
-      .list()
-      .then(setGroups)
-      .catch((err) => {
-        setGroups([]);
-        setError(err instanceof Error ? err.message : 'Couldn\'t load groups');
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const filteredGroups = groups.filter(group =>
+    group.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  useEffect(() => { load(); }, [load]);
+  const filteredRecentGroups = recentGroups.filter(group =>
+    group.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  const allGroups = groups.map((g, i) => ({
-    ...g,
-    members: g.memberCount,
-    balance: 0,
-    color: COLORS[i % COLORS.length],
-  })).filter((g) => !searchQuery || g.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const displayGroups = activeTab === 'active' ? filteredGroups : filteredRecentGroups;
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-screen flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
       {/* Header */}
-      <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} border-b px-5 py-5`}>
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200'} border-b px-5 py-5 flex-shrink-0 z-10`}
+      >
         <div className="flex items-center gap-3 mb-4">
-          <button
+          <button 
             onClick={() => onNavigate('home')}
-            className={`w-11 h-11 rounded-2xl ${isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center active:scale-95 transition-transform`}
+            className={`w-11 h-11 rounded-[16px] ${isDark ? 'bg-slate-700' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform shadow-sm`}
           >
             <ChevronLeft size={22} className={isDark ? 'text-white' : 'text-purple-600'} strokeWidth={2.5} />
           </button>
@@ -54,67 +51,127 @@ export function GroupsPage({ onNavigate, theme }: GroupsPageProps) {
         </div>
 
         {/* Search Bar */}
-        <div className="relative">
+        <div className="relative mb-4">
           <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-purple-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search groups..."
-            className={`w-full pl-11 pr-4 py-3.5 ${isDark ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-50 text-slate-900 border-slate-200'} rounded-2xl text-[15px] border focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-colors`}
+            className={`w-full pl-11 pr-4 py-3.5 ${isDark ? 'bg-slate-700 text-white border-slate-600' : 'bg-white text-slate-900 border-slate-200'} rounded-[18px] text-[15px] border shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent transition-all`}
           />
         </div>
-      </div>
+
+        {/* Tab Switcher */}
+        <div className={`flex gap-2 ${isDark ? 'bg-slate-700' : 'bg-slate-100'} p-1 rounded-xl`}>
+          <button
+            onClick={() => setActiveTab('active')}
+            className={`flex-1 py-2 rounded-lg font-semibold text-sm transition-all ${
+              activeTab === 'active'
+                ? isDark ? 'bg-purple-600 text-white' : 'bg-white text-purple-600 shadow-sm'
+                : isDark ? 'text-slate-400' : 'text-slate-600'
+            }`}
+          >
+            Active ({groups.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('recent')}
+            className={`flex-1 py-2 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-1.5 ${
+              activeTab === 'recent'
+                ? isDark ? 'bg-purple-600 text-white' : 'bg-white text-purple-600 shadow-sm'
+                : isDark ? 'text-slate-400' : 'text-slate-600'
+            }`}
+          >
+            <Archive size={16} />
+            Recent ({recentGroups.length})
+          </button>
+        </div>
+      </motion.div>
 
       {/* Groups List */}
-      <div className="flex-1 overflow-y-auto px-5 py-5" style={{ WebkitOverflowScrolling: 'touch' }}>
-        <div className="space-y-3">
-          {error && (
-            <div className={`rounded-xl p-4 mb-4 ${isDark ? 'bg-amber-900/30 border-amber-700' : 'bg-amber-50 border-amber-200'} border`}>
-              <p className={`text-sm mb-3 ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>{error}</p>
-              <button onClick={load} className="text-sm font-semibold text-amber-600">Retry</button>
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        {displayGroups.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full">
+            <div className={`w-20 h-20 rounded-full ${isDark ? 'bg-slate-800' : 'bg-slate-100'} flex items-center justify-center mb-4`}>
+              <Search size={32} className={isDark ? 'text-slate-600' : 'text-slate-400'} />
             </div>
-          )}
-          {loading && <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>Loading groups...</p>}
-          {!loading && !error && allGroups.length === 0 && (
-            <p className={isDark ? 'text-slate-400' : 'text-slate-500'}>No groups yet. Create one!</p>
-          )}
-          {allGroups.map((group, index) => (
-            <button
-              key={group.id}
-              onClick={() => onNavigate({ page: 'groupDetail', groupId: group.id })}
-              className={`w-full text-left ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} rounded-2xl p-5 shadow-sm active:scale-[0.98] transition-transform border`}
+            <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'} text-center`}>
+              {searchQuery ? `No groups found for "${searchQuery}"` : 'No groups yet. Create one!'}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-3 mb-5">
+              {displayGroups.map((group, index) => (
+                <motion.button
+                  key={group.id}
+                  onClick={() => activeTab === 'active' ? onNavigate('groupDetail', group.id) : undefined}
+                  initial={{ x: -8, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: index * 0.03, duration: 0.15 }}
+                  className={`w-full ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} ${activeTab === 'active' ? 'active:scale-[0.98]' : 'opacity-60'} transition-transform border`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div 
+                      className="w-16 h-16 rounded-[20px] flex items-center justify-center relative"
+                      style={{ backgroundColor: group.color }}
+                    >
+                      {activeTab === 'recent' && (
+                        <div className="absolute inset-0 bg-black/40 rounded-[20px] flex items-center justify-center">
+                          <Archive size={24} className="text-white" />
+                        </div>
+                      )}
+                      <Users size={28} className="text-white" strokeWidth={2.5} />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-[18px] mb-0.5`}>{group.name}</h3>
+                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} font-medium`}>
+                        {activeTab === 'recent' && 'deletedAt' in group 
+                          ? `Deleted ${new Date((group as any).deletedAt).toLocaleDateString()}`
+                          : `${group.members} members`
+                        }
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-xl mb-0.5`}>
+                        ${group.balance.toFixed(2)}
+                      </p>
+                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-400'} font-medium`}>balance</p>
+                    </div>
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+
+            {/* Create Group Button */}
+            <motion.div
+              initial={{ y: 8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ duration: 0.15 }}
+              className="pb-5"
             >
-              <div className="flex items-center gap-4">
-                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${group.color} flex items-center justify-center shadow-sm`}>
-                  <Users size={28} className="text-white" strokeWidth={2.5} />
-                </div>
-                <div className="flex-1">
-                  <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-[18px] mb-0.5`}>{group.name}</h3>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} font-medium`}>{group.members} members</p>
-                </div>
-                <div className="text-right">
-                  <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-sm mb-0.5`}>
-                    {group.cardLastFour ? `•••• ${group.cardLastFour}` : '—'}
-                  </p>
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-400'} font-medium`}>card</p>
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
+              <button 
+                onClick={() => onNavigate('createGroup')}
+                className="w-full bg-purple-600 text-white py-4.5 rounded-[20px] font-bold active:scale-[0.98] transition-transform flex items-center justify-center gap-2.5 text-[17px]"
+              >
+                <Plus size={26} strokeWidth={2.5} />
+                Create New Group
+              </button>
+            </motion.div>
+          </>
+        )}
       </div>
 
-      {/* Create Group Button */}
-      <div className="px-5 pb-7">
-        <button
-          onClick={() => onNavigate('createGroup')}
-          className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-2xl font-bold shadow-lg active:scale-[0.98] transition-transform flex items-center justify-center gap-2.5 text-[17px]"
-        >
-          <Plus size={26} strokeWidth={2.5} />
-          Create New Group
-        </button>
-      </div>
+      <BottomNavigation currentPage="groups" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
+      {showProfileSheet && (
+        <ProfileSheet 
+          onClose={() => setShowProfileSheet(false)} 
+          onNavigateToAccount={() => onNavigate('account')}
+          onNavigateToSettings={() => onNavigate('settings')}
+          onNavigateToWallet={() => onNavigate('wallet')}
+          theme={theme}
+        />
+      )}
     </div>
   );
 }
