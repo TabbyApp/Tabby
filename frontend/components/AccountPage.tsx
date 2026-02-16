@@ -14,15 +14,15 @@ interface AccountPageProps {
 
 export function AccountPage({ onNavigate, theme }: AccountPageProps) {
   const isDark = theme === 'dark';
-  const { user, setUser } = useAuth();
+  const { user, setUser, refreshBootstrap } = useAuth();
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingPhone, setIsEditingPhone] = useState(false);
   const [name, setName] = useState(user?.name ?? '');
   const [tempName, setTempName] = useState(user?.name ?? '');
-  const [phone, setPhone] = useState('');
-  const [tempPhone, setTempPhone] = useState('');
-  const [bankLinked, setBankLinked] = useState(false);
-  const [paymentMethods, setPaymentMethods] = useState<Array<{ id: string; type: string; last_four: string; brand: string | null }>>([]);
+  const phone = user?.phone ?? '';
+  const [tempPhone, setTempPhone] = useState(user?.phone ?? '');
+  const bankLinked = !!user?.bank_linked;
+  const paymentMethods = user?.paymentMethods ?? [];
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [linkingBank, setLinkingBank] = useState(false);
 
@@ -30,20 +30,9 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
     if (user) {
       setName(user.name);
       setTempName(user.name);
+      setTempPhone(user.phone ?? '');
     }
   }, [user]);
-
-  // Fetch full user profile from API
-  useEffect(() => {
-    api.users.me().then((data) => {
-      setPhone(data.phone ?? '');
-      setTempPhone(data.phone ?? '');
-      setBankLinked(!!data.bank_linked);
-      if (Array.isArray(data.paymentMethods)) {
-        setPaymentMethods(data.paymentMethods as any[]);
-      }
-    }).catch(() => {});
-  }, []);
 
   const handleSaveName = () => {
     const newName = tempName.trim();
@@ -68,12 +57,7 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
     setLinkingBank(true);
     try {
       await api.users.linkBank();
-      setBankLinked(true);
-      // Refresh payment methods
-      const data = await api.users.me();
-      if (Array.isArray(data.paymentMethods)) {
-        setPaymentMethods(data.paymentMethods as any[]);
-      }
+      await refreshBootstrap();
     } catch {} finally {
       setLinkingBank(false);
     }

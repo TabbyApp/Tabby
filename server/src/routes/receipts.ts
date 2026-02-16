@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
-import { db } from '../db.js';
+import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { extractReceiptItems } from '../ocr.js';
 
@@ -52,11 +52,12 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
       return res.status(400).json({ error: 'groupId is required' });
     }
 
-    const memberCheck = db.prepare(
-      'SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?'
-    ).get(groupId, userId);
+    const { rows: memberRows } = await query(
+      'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+      [groupId, userId]
+    );
 
-    if (!memberCheck) {
+    if (memberRows.length === 0) {
       return res.status(404).json({ error: 'Group not found' });
     }
 
@@ -66,7 +67,6 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
 
     const fullPath = path.join(uploadsDir, file.filename);
 
-    // Run OCR first - if it fails, return error so user can try again (no receipt created)
     let items: { name: string; price: number }[];
     try {
       const ocrPromise = extractReceiptItems(fullPath);
@@ -75,7 +75,6 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
       );
       items = await Promise.race([ocrPromise, timeout]);
     } catch (ocrErr) {
-      // Delete the uploaded file since we're not keeping it
       try { fs.unlinkSync(fullPath); } catch { /* ignore */ }
       const msg = ocrErr instanceof Error ? ocrErr.message : 'Couldn\'t read the image.';
       console.warn('OCR failed:', msg);
@@ -85,69 +84,78 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
     const id = genId();
     const filePath = `/uploads/${file.filename}`;
 
-    db.prepare(
-      'INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(id, groupId, userId, filePath, total ? parseFloat(total) : null, 'pending');
+    await query(
+      'INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status) VALUES ($1, $2, $3, $4, $5, $6)',
+      [id, groupId, userId, filePath, total ? parseFloat(total) : null, 'pending']
+    );
 
     let sortOrder = 0;
     for (const item of items) {
       try {
-        db.prepare(
-          'INSERT INTO receipt_items (id, receipt_id, name, price, sort_order) VALUES (?, ?, ?, ?, ?)'
-        ).run(genId(), id, item.name, item.price, sortOrder++);
+        await query(
+          'INSERT INTO receipt_items (id, receipt_id, name, price, sort_order) VALUES ($1, $2, $3, $4, $5)',
+          [genId(), id, item.name, item.price, sortOrder++]
+        );
       } catch {
         // skip constraint errors
       }
     }
 
-    const receipt = db.prepare('SELECT * FROM receipts WHERE id = ?').get(id);
-    res.status(201).json(receipt);
+    const { rows } = await query('SELECT * FROM receipts WHERE id = $1', [id]);
+    res.status(201).json(rows[0]);
   } catch (err) {
     console.error('Upload error:', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Upload failed' });
   }
 });
 
-receiptsRouter.get('/', requireAuth, (req, res) => {
+receiptsRouter.get('/', requireAuth, async (req, res) => {
   try {
     const { userId } = (req as any).user;
     const { groupId } = req.query;
     if (!groupId || typeof groupId !== 'string') {
       return res.status(400).json({ error: 'groupId query param required' });
     }
-    const memberCheck = db.prepare(
-      'SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?'
-    ).get(groupId, userId);
-    if (!memberCheck) {
+    const { rows: memberRows } = await query(
+      'SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2',
+      [groupId, userId]
+    );
+    if (memberRows.length === 0) {
       return res.status(404).json({ error: 'Group not found' });
     }
-    const receipts = db.prepare(
-      'SELECT id, group_id, status, total, created_at, transaction_id FROM receipts WHERE group_id = ? ORDER BY created_at DESC'
-    ).all(groupId) as { id: string; group_id: string; status: string; total: number | null; created_at: string; transaction_id: string | null }[];
 
-    const withSplits = receipts.map((r) => {
+    const { rows: receipts } = await query<{ id: string; group_id: string; status: string; total: number | null; created_at: string; transaction_id: string | null }>(
+      'SELECT id, group_id, status, total, created_at, transaction_id FROM receipts WHERE group_id = $1 ORDER BY created_at DESC',
+      [groupId]
+    );
+
+    const withSplits = await Promise.all(receipts.map(async (r) => {
       try {
         let splits: { user_id: string; amount: number; status: string; name: string }[];
         if (r.transaction_id) {
-          splits = db.prepare(
+          const { rows: splitRows } = await query<{ user_id: string; amount: number; status: string; name: string }>(
             `SELECT ta.user_id, ta.amount, 'completed' as status, u.name
              FROM transaction_allocations ta
              JOIN users u ON ta.user_id = u.id
-             WHERE ta.transaction_id = ?`
-          ).all(r.transaction_id) as { user_id: string; amount: number; status: string; name: string }[];
+             WHERE ta.transaction_id = $1`,
+            [r.transaction_id]
+          );
+          splits = splitRows;
         } else {
-          splits = db.prepare(
+          const { rows: splitRows } = await query<{ user_id: string; amount: number; status: string; name: string }>(
             `SELECT rs.user_id, rs.amount, rs.status, u.name
              FROM receipt_splits rs
              JOIN users u ON rs.user_id = u.id
-             WHERE rs.receipt_id = ?`
-          ).all(r.id) as { user_id: string; amount: number; status: string; name: string }[];
+             WHERE rs.receipt_id = $1`,
+            [r.id]
+          );
+          splits = splitRows;
         }
         return { ...r, splits };
       } catch {
         return { ...r, splits: [] };
       }
-    });
+    }));
 
     res.json(withSplits);
   } catch (err) {
@@ -156,64 +164,70 @@ receiptsRouter.get('/', requireAuth, (req, res) => {
   }
 });
 
-receiptsRouter.get('/splits/me', requireAuth, (req, res) => {
+receiptsRouter.get('/splits/me', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
-  const rows = db.prepare(`
+  const { rows } = await query<{ id: string; receipt_id: string; amount: number; status: string; created_at: string; group_id: string; group_name: string }>(`
     SELECT rs.id, rs.receipt_id, rs.amount, rs.status, rs.created_at,
            r.group_id,
            g.name as group_name
     FROM receipt_splits rs
     JOIN receipts r ON rs.receipt_id = r.id
     JOIN groups g ON r.group_id = g.id
-    WHERE rs.user_id = ?
+    WHERE rs.user_id = $1
     ORDER BY rs.created_at DESC
     LIMIT 50
-  `).all(userId) as { id: string; receipt_id: string; amount: number; status: string; created_at: string; group_id: string; group_name: string }[];
+  `, [userId]);
   res.json(rows);
 });
 
-receiptsRouter.get('/:receiptId', requireAuth, (req, res) => {
+receiptsRouter.get('/:receiptId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { receiptId } = req.params;
 
-  const receipt = db.prepare(
-    'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = ? AND gm.user_id = ?'
-  ).get(receiptId, userId) as any;
+  const { rows } = await query(
+    'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = $1 AND gm.user_id = $2',
+    [receiptId, userId]
+  );
+  const receipt = rows[0] as any;
 
   if (!receipt) {
     return res.status(404).json({ error: 'Receipt not found' });
   }
 
-  const items = db.prepare(
-    'SELECT id, name, price, sort_order FROM receipt_items WHERE receipt_id = ? ORDER BY sort_order, id'
-  ).all(receiptId) as { id: string; name: string; price: number; sort_order: number }[];
+  const { rows: items } = await query<{ id: string; name: string; price: number; sort_order: number }>(
+    'SELECT id, name, price, sort_order FROM receipt_items WHERE receipt_id = $1 ORDER BY sort_order, id',
+    [receiptId]
+  );
 
   const claims: Record<string, string[]> = {};
   for (const item of items) {
-    const c = db.prepare(
-      'SELECT user_id FROM item_claims WHERE receipt_item_id = ?'
-    ).all(item.id) as { user_id: string }[];
-    claims[item.id] = c.map((x) => x.user_id);
+    const { rows: claimRows } = await query<{ user_id: string }>(
+      'SELECT user_id FROM item_claims WHERE receipt_item_id = $1',
+      [item.id]
+    );
+    claims[item.id] = claimRows.map((x) => x.user_id);
   }
 
-  const members = db.prepare(`
+  const { rows: members } = await query<{ id: string; name: string; email: string }>(`
     SELECT u.id, u.name, u.email
     FROM group_members gm
     JOIN users u ON gm.user_id = u.id
-    WHERE gm.group_id = ?
-  `).all(receipt.group_id) as { id: string; name: string; email: string }[];
+    WHERE gm.group_id = $1
+  `, [receipt.group_id]);
 
   res.json({ ...receipt, items, claims, members });
 });
 
-receiptsRouter.post('/:receiptId/items', requireAuth, (req, res) => {
+receiptsRouter.post('/:receiptId/items', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { receiptId } = req.params;
   const { name, price } = req.body;
 
-  const receipt = db.prepare(
-    'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = ? AND gm.user_id = ?'
-  ).get(receiptId, userId);
+  const { rows } = await query(
+    'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = $1 AND gm.user_id = $2',
+    [receiptId, userId]
+  );
+  const receipt = rows[0];
 
   if (!receipt) {
     return res.status(404).json({ error: 'Receipt not found' });
@@ -223,66 +237,73 @@ receiptsRouter.post('/:receiptId/items', requireAuth, (req, res) => {
   }
 
   const id = genId();
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as m FROM receipt_items WHERE receipt_id = ?').get(receiptId) as { m: number };
-  db.prepare(
-    'INSERT INTO receipt_items (id, receipt_id, name, price, sort_order) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, receiptId, String(name).trim(), price, (maxOrder?.m ?? 0) + 1);
+  const { rows: maxRows } = await query<{ m: string }>('SELECT COALESCE(MAX(sort_order), 0)::text as m FROM receipt_items WHERE receipt_id = $1', [receiptId]);
+  const maxOrder = parseInt(maxRows[0]?.m ?? '0', 10);
+  await query(
+    'INSERT INTO receipt_items (id, receipt_id, name, price, sort_order) VALUES ($1, $2, $3, $4, $5)',
+    [id, receiptId, String(name).trim(), price, maxOrder + 1]
+  );
 
-  const item = db.prepare('SELECT id, name, price, sort_order FROM receipt_items WHERE id = ?').get(id);
-  res.status(201).json(item);
+  const { rows: itemRows } = await query('SELECT id, name, price, sort_order FROM receipt_items WHERE id = $1', [id]);
+  res.status(201).json(itemRows[0]);
 });
 
-receiptsRouter.put('/:receiptId/items/:itemId/claims', requireAuth, (req, res) => {
+receiptsRouter.put('/:receiptId/items/:itemId/claims', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { receiptId, itemId } = req.params;
   const { userIds } = req.body;
 
-  const receipt = db.prepare(
-    'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = ? AND gm.user_id = ?'
-  ).get(receiptId, userId);
+  const { rows } = await query(
+    'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = $1 AND gm.user_id = $2',
+    [receiptId, userId]
+  );
+  const receipt = rows[0] as any;
 
   if (!receipt) {
     return res.status(404).json({ error: 'Receipt not found' });
   }
 
-  const item = db.prepare('SELECT id FROM receipt_items WHERE id = ? AND receipt_id = ?').get(itemId, receiptId);
-  if (!item) {
+  const { rows: itemRows } = await query<{ id: string }>('SELECT id FROM receipt_items WHERE id = $1 AND receipt_id = $2', [itemId, receiptId]);
+  if (itemRows.length === 0) {
     return res.status(404).json({ error: 'Item not found' });
   }
 
   const ids = Array.isArray(userIds) ? userIds : [];
-  db.prepare('DELETE FROM item_claims WHERE receipt_item_id = ?').run(itemId);
+  await query('DELETE FROM item_claims WHERE receipt_item_id = $1', [itemId]);
   for (const uid of ids) {
-    const isMember = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get((receipt as any).group_id, uid);
-    if (isMember) {
-      db.prepare('INSERT OR IGNORE INTO item_claims (receipt_item_id, user_id) VALUES (?, ?)').run(itemId, uid);
+    const { rows: memberRows } = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [receipt.group_id, uid]);
+    if (memberRows.length > 0) {
+      await query('INSERT INTO item_claims (receipt_item_id, user_id) VALUES ($1, $2) ON CONFLICT (receipt_item_id, user_id) DO NOTHING', [itemId, uid]);
     }
   }
 
-  const claims = db.prepare('SELECT user_id FROM item_claims WHERE receipt_item_id = ?').all(itemId) as { user_id: string }[];
-  res.json({ userIds: claims.map((c) => c.user_id) });
+  const { rows: claimRows } = await query<{ user_id: string }>('SELECT user_id FROM item_claims WHERE receipt_item_id = $1', [itemId]);
+  res.json({ userIds: claimRows.map((c) => c.user_id) });
 });
 
-receiptsRouter.post('/:receiptId/complete', requireAuth, (req, res) => {
+receiptsRouter.post('/:receiptId/complete', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { receiptId } = req.params;
 
-  const receipt = db.prepare(
-    'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = ? AND gm.user_id = ?'
-  ).get(receiptId, userId) as any;
+  const { rows } = await query(
+    'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = $1 AND gm.user_id = $2',
+    [receiptId, userId]
+  );
+  const receipt = rows[0] as any;
 
   if (!receipt) {
     return res.status(404).json({ error: 'Receipt not found' });
   }
 
-  const items = db.prepare(
-    'SELECT id, price FROM receipt_items WHERE receipt_id = ?'
-  ).all(receiptId) as { id: string; price: number }[];
+  const { rows: items } = await query<{ id: string; price: number }>(
+    'SELECT id, price FROM receipt_items WHERE receipt_id = $1',
+    [receiptId]
+  );
 
   const userTotals: Record<string, number> = {};
   for (const item of items) {
-    const claimers = db.prepare('SELECT user_id FROM item_claims WHERE receipt_item_id = ?').all(item.id) as { user_id: string }[];
-    const uids = claimers.map((c) => c.user_id);
+    const { rows: claimRows } = await query<{ user_id: string }>('SELECT user_id FROM item_claims WHERE receipt_item_id = $1', [item.id]);
+    const uids = claimRows.map((c) => c.user_id);
     if (uids.length === 0) continue;
     const share = item.price / uids.length;
     for (const uid of uids) {
@@ -290,22 +311,23 @@ receiptsRouter.post('/:receiptId/complete', requireAuth, (req, res) => {
     }
   }
 
-  db.prepare('DELETE FROM receipt_splits WHERE receipt_id = ?').run(receiptId);
+  await query('DELETE FROM receipt_splits WHERE receipt_id = $1', [receiptId]);
   for (const [uid, amount] of Object.entries(userTotals)) {
     if (amount > 0) {
-      db.prepare(
-        'INSERT INTO receipt_splits (id, receipt_id, user_id, amount, status) VALUES (?, ?, ?, ?, ?)'
-      ).run(genId(), receiptId, uid, amount, 'pending');
+      await query(
+        'INSERT INTO receipt_splits (id, receipt_id, user_id, amount, status) VALUES ($1, $2, $3, $4, $5)',
+        [genId(), receiptId, uid, amount, 'pending']
+      );
     }
   }
 
-  db.prepare('UPDATE receipts SET status = ? WHERE id = ?').run('completed', receiptId);
+  await query('UPDATE receipts SET status = $1 WHERE id = $2', ['completed', receiptId]);
 
-  const splits = db.prepare(`
+  const { rows: splits } = await query<{ user_id: string; amount: number; name: string }>(`
     SELECT rs.user_id, rs.amount, u.name
     FROM receipt_splits rs
     JOIN users u ON rs.user_id = u.id
-    WHERE rs.receipt_id = ?
-  `).all(receiptId) as { user_id: string; amount: number; name: string }[];
+    WHERE rs.receipt_id = $1
+  `, [receiptId]);
   res.json({ ok: true, splits });
 });

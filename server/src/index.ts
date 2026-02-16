@@ -17,10 +17,13 @@ process.on('uncaughtException', (err) => {
 
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
+import { bootstrapRouter } from './routes/bootstrap.js';
 import { groupsRouter } from './routes/groups.js';
+import { invitesRouter } from './routes/invites.js';
+import { plaidRouter } from './routes/plaid.js';
 import { receiptsRouter } from './routes/receipts.js';
 import { transactionsRouter, runFallbackForTransaction } from './routes/transactions.js';
-import { db } from './db.js';
+import { query, pool } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -31,12 +34,33 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
 app.use(express.json());
 
+// Request timing - log slow API calls with per-step breakdown
+app.use('/api', (req, res, next) => {
+  const start = Date.now();
+  (res as any).__timingStart = start;
+  res.on('finish', () => {
+    const total = Date.now() - start;
+    if (total > 100) {
+      const authMs = (res as any).__timingAuthDone != null ? (res as any).__timingAuthDone - start : null;
+      const handlerMs = authMs != null ? total - authMs : null;
+      console.warn(
+        `[slow] ${req.method} ${req.path} ${total}ms` +
+        (authMs != null ? ` (auth=${authMs}ms handler=${handlerMs}ms)` : '')
+      );
+    }
+  });
+  next();
+});
+
 // Receipt uploads
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
+app.use('/api/bootstrap', bootstrapRouter);
 app.use('/api/groups', groupsRouter);
+app.use('/api/invites', invitesRouter);
+app.use('/api/plaid', plaidRouter);
 app.use('/api/receipts', receiptsRouter);
 app.use('/api/transactions', transactionsRouter);
 
@@ -50,23 +74,46 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: msg });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+// Health check: DB connectivity
+app.get('/health', async (_req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ ok: true, db: 'connected' });
+  } catch (err) {
+    res.status(503).json({ ok: false, db: 'disconnected', error: (err as Error)?.message });
+  }
+});
 
-  // Timer: every 30s check for expired PENDING_ALLOCATION transactions
-  setInterval(() => {
+// Block startup until DB is connected - ensures first request isn't slow
+async function start() {
+  try {
+    await pool.query('SELECT 1');
+    console.log('DB connected');
+  } catch (err) {
+    console.error('DB connection failed:', (err as Error)?.message);
+    process.exit(1);
+  }
+
+  app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+
+    // Timer: every 30s check for expired PENDING_ALLOCATION transactions
+  setInterval(async () => {
     try {
-      const rows = db.prepare(`
+      const { rows } = await query<{ id: string }>(`
         SELECT id FROM transactions
         WHERE status = 'PENDING_ALLOCATION' AND allocation_deadline_at IS NOT NULL
-        AND datetime(allocation_deadline_at) <= datetime('now')
-      `).all() as { id: string }[];
+        AND allocation_deadline_at <= now()
+      `);
       for (const r of rows) {
-        runFallbackForTransaction(r.id);
+        await runFallbackForTransaction(r.id);
         console.log('[Timer] Fallback-even applied for transaction', r.id);
       }
     } catch (err) {
       console.error('[Timer] Error:', err);
     }
   }, 30_000);
-});
+  });
+}
+
+start();

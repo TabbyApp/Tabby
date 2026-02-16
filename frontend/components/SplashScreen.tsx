@@ -4,13 +4,15 @@ import { TabbyCatLogo } from './TabbyCatLogo';
 
 interface SplashScreenProps {
   onComplete: () => void;
+  /** Shown after animation when still loading (e.g. "Loading your account...") */
+  loadingMessage?: string;
 }
 
-export function SplashScreen({ onComplete }: SplashScreenProps) {
+export function SplashScreen({ onComplete, loadingMessage }: SplashScreenProps) {
   useEffect(() => {
     const timer = setTimeout(() => {
       onComplete();
-    }, 2000);
+    }, 1200);
     return () => clearTimeout(timer);
   }, [onComplete]);
 
@@ -58,7 +60,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             }}
             className="text-lg text-center text-slate-600"
           >
-            Awkwardness Ends Here
+            {loadingMessage ?? 'Awkwardness Ends Here'}
           </motion.p>
         </div>
       </div>

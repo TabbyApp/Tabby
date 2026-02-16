@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { SplashScreen } from './components/SplashScreen';
 import { LoginSignup } from './components/LoginSignup';
 import { LandingPage } from './components/LandingPage';
@@ -45,7 +46,7 @@ export interface AppGroup {
 const GROUP_COLORS = ['#3B82F6', '#A855F7', '#22C55E', '#F97316', '#EC4899', '#14B8A6', '#F59E0B', '#6366F1'];
 
 export default function App() {
-  const { user, loading: authLoading, logout } = useAuth();
+  const { user, groups: bootstrapGroups, virtualCards: bootstrapCards, loading: authLoading, logout, refreshBootstrap } = useAuth();
   const [splashAnimDone, setSplashAnimDone] = useState(false);
   const [initialDataLoaded, setInitialDataLoaded] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -89,61 +90,48 @@ export default function App() {
 
   const unreadNotificationCount = notifications.filter(n => !n.read).length;
 
-  // Fetch groups from API
+  // Fetch groups (uses bootstrap - single request)
   const loadGroups = useCallback(async () => {
     if (!user) return;
     try {
-      const apiGroups = await api.groups.list();
-      const mapped: AppGroup[] = apiGroups.map((g, i) => ({
-        id: g.id,
-        name: g.name,
-        members: g.memberCount,
-        balance: 0,
-        color: GROUP_COLORS[i % GROUP_COLORS.length],
-        createdBy: '',
-      }));
-      setGroups(mapped);
+      await refreshBootstrap();
     } catch {
       // Keep existing on error
     }
-  }, [user]);
+  }, [user, refreshBootstrap]);
 
-  // Preload groups + initial data as soon as auth resolves (while splash is still showing)
+  // Use bootstrap data (user + groups + virtualCards) - no extra fetch after login/refresh
   useEffect(() => {
-    if (authLoading) return; // Still checking auth, wait
+    if (authLoading) return;
     if (!user) {
-      // No user = nothing to preload, mark ready immediately
       setGroups([]);
+      setCardInfo(null);
       setInitialDataLoaded(true);
       return;
     }
-    // User is available - preload groups + virtual cards in parallel
-    Promise.all([
-      api.groups.list().catch(() => []),
-      api.groups.virtualCards().catch(() => []),
-    ]).then(([apiGroups, cards]) => {
-      const mapped: AppGroup[] = (apiGroups as any[]).map((g: any, i: number) => ({
-        id: g.id,
-        name: g.name,
-        members: g.memberCount,
-        balance: 0,
-        color: GROUP_COLORS[i % GROUP_COLORS.length],
-        createdBy: '',
-      }));
-      setGroups(mapped);
-      if (cards.length > 0) {
-        const totalBalance = (cards as any[]).reduce((sum: number, c: any) => sum + (c.groupTotal ?? 0), 0);
-        setCardInfo({
-          lastFour: (cards as any[])[0].cardLastFour ?? '0000',
-          balance: totalBalance,
-        });
-      }
-      // Prefetch ALL group details in background so tapping any group is instant
-      if (mapped.length > 0) {
-        prefetchAllGroupDetails(mapped.map(g => g.id));
-      }
-    }).finally(() => setInitialDataLoaded(true));
-  }, [authLoading, user]);
+    const mapped: AppGroup[] = bootstrapGroups.map((g, i) => ({
+      id: g.id,
+      name: g.name,
+      members: g.memberCount,
+      balance: 0,
+      color: GROUP_COLORS[i % GROUP_COLORS.length],
+      createdBy: '',
+    }));
+    setGroups(mapped);
+    if (bootstrapCards.length > 0) {
+      const totalBalance = bootstrapCards.reduce((sum, c) => sum + (c.groupTotal ?? 0), 0);
+      setCardInfo({
+        lastFour: bootstrapCards[0].cardLastFour ?? '0000',
+        balance: totalBalance,
+      });
+    } else {
+      setCardInfo(null);
+    }
+    if (mapped.length > 0) {
+      prefetchAllGroupDetails(mapped.map(g => g.id));
+    }
+    setInitialDataLoaded(true);
+  }, [authLoading, user, bootstrapGroups, bootstrapCards]);
 
   const acceptInvite = (inviteId: number) => {
     setPendingInvites(prev => prev.filter(inv => inv.id !== inviteId));
@@ -172,18 +160,9 @@ export default function App() {
 
   const theme = themePreference === 'system' ? 'light' : themePreference;
 
-  // Track which pages have been visited to keep them mounted (display:none)
-  const [visitedPages, setVisitedPages] = useState<Set<PageType>>(new Set(['home']));
-
   const handleNavigate = (page: PageType, groupId?: string) => {
     setPageHistory(prev => [...prev, currentPage]);
     setCurrentPage(page);
-    setVisitedPages(prev => {
-      if (prev.has(page)) return prev;
-      const next = new Set(prev);
-      next.add(page);
-      return next;
-    });
     if (groupId !== undefined) {
       setSelectedGroupId(groupId);
       if (page === 'receiptScan') {
@@ -217,90 +196,60 @@ export default function App() {
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-black'}`}>
       <div className={`mx-auto max-w-[430px] h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-[#F2F2F7]'} relative overflow-hidden`}>
         {showSplash ? (
-          <SplashScreen onComplete={() => setSplashAnimDone(true)} />
+          <SplashScreen
+            onComplete={() => setSplashAnimDone(true)}
+            loadingMessage={(authLoading || !initialDataLoaded) && splashAnimDone ? 'Loading your account...' : undefined}
+          />
         ) : showForgotPassword ? (
           <ForgotPasswordPage onNavigate={handleNavigate} onBack={() => setShowForgotPassword(false)} theme={theme} />
         ) : !isAuthenticated ? (
           <LoginSignup onAuthenticate={() => {}} onForgotPassword={() => setShowForgotPassword(true)} />
         ) : (
-          <>
-            {/* ===== PERSISTENT TAB PAGES (stay mounted once visited, toggled via display) ===== */}
-            <div style={{ display: currentPage === 'home' ? 'contents' : 'none' }}>
-              <LandingPage 
-                onNavigate={handleNavigate} theme={theme} groups={groups} 
-                unreadNotificationCount={unreadNotificationCount}
-                pendingInvites={pendingInvites} acceptInvite={acceptInvite} declineInvite={declineInvite}
-                preloadedCardInfo={cardInfo}
-              />
-            </div>
-            {visitedPages.has('groups') && (
-              <div style={{ display: currentPage === 'groups' ? 'contents' : 'none' }}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentPage}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
+              className="w-full min-h-full"
+            >
+              {currentPage === 'home' && (
+                <LandingPage 
+                  onNavigate={handleNavigate} theme={theme} groups={groups} 
+                  unreadNotificationCount={unreadNotificationCount}
+                  pendingInvites={pendingInvites} acceptInvite={acceptInvite} declineInvite={declineInvite}
+                  preloadedCardInfo={cardInfo}
+                />
+              )}
+              {currentPage === 'groups' && (
                 <GroupsPage 
                   onNavigate={handleNavigate} theme={theme} groups={groups}
                   recentGroups={[]} accountType={accountType}
                   deleteGroup={deleteGroup} leaveGroup={leaveGroup} currentUserId={user?.id ?? ''}
                 />
-              </div>
-            )}
-            {visitedPages.has('activity') && (
-              <div style={{ display: currentPage === 'activity' ? 'contents' : 'none' }}>
-                <ActivityPage onNavigate={handleNavigate} theme={theme} />
-              </div>
-            )}
-            {visitedPages.has('account') && (
-              <div style={{ display: currentPage === 'account' ? 'contents' : 'none' }}>
-                <AccountPage onNavigate={handleNavigate} theme={theme} />
-              </div>
-            )}
-
-            {/* ===== ON-DEMAND PAGES (mount/unmount as needed) ===== */}
-            {currentPage === 'settings' && <SettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} onLogout={handleLogout} />}
-            {currentPage === 'wallet' && <VirtualWalletPage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'cardDetails' && <CardDetailsPage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'createGroup' && <CreateGroupPage 
-              onNavigate={handleNavigate} theme={theme} 
-              onGroupCreated={loadGroups}
-            />}
-            {currentPage === 'receiptScan' && <ReceiptScanPage
-              onNavigate={handleNavigate} theme={theme}
-              realGroupId={processingGroupId}
-              onReceiptUploaded={(id) => setLastReceiptId(id)}
-            />}
-            {currentPage === 'receiptItems' && <ReceiptItemsPage 
-              onNavigate={handleNavigate} theme={theme}
-              setReceiptData={setReceiptData} setItemSplitData={setItemSplitData}
-              receiptId={lastReceiptId} groupId={processingGroupId}
-            />}
-            {currentPage === 'processing' && <ProcessingPaymentPage 
-              onNavigate={handleNavigate} theme={theme}
-              groupId={processingGroupId} accountType={accountType}
-              transactionId={currentTransactionId}
-              receiptData={receiptData} itemSplitData={itemSplitData}
-            />}
-            {currentPage === 'groupDetail' && <GroupDetailPage 
-              onNavigate={handleNavigate} theme={theme}
-              groupId={selectedGroupId} groups={groups}
-              deleteGroup={deleteGroup} leaveGroup={leaveGroup}
-              currentUserId={user?.id ?? ''}
-              itemSplitData={itemSplitData} setItemSplitData={setItemSplitData}
-              receiptData={receiptData}
-              onStartProcessing={(txId) => { setCurrentTransactionId(txId); }}
-              onGroupsChanged={loadGroups}
-            />}
-            {currentPage === 'notifications' && <NotificationsPage 
-              onNavigate={handleNavigate} theme={theme}
-              notifications={notifications} setNotifications={setNotifications}
-              unreadCount={unreadNotificationCount} acceptInvite={acceptInvite} declineInvite={declineInvite}
-            />}
-            {currentPage === 'notificationsSettings' && <NotificationsSettingsPage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'privacySettings' && <PrivacySettingsPage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'helpSupport' && <HelpSupportPage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'appearanceSettings' && <AppearanceSettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} themePreference={themePreference} />}
-            {currentPage === 'changePassword' && <ChangePasswordPage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'twoFactorAuth' && <TwoFactorAuthPage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'acceptInvite' && <AcceptInvitePage onNavigate={handleNavigate} theme={theme} />}
-            {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
-          </>
+              )}
+              {currentPage === 'activity' && <ActivityPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'account' && <AccountPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'settings' && <SettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} onLogout={handleLogout} />}
+              {currentPage === 'wallet' && <VirtualWalletPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'cardDetails' && <CardDetailsPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'createGroup' && <CreateGroupPage onNavigate={handleNavigate} theme={theme} onGroupCreated={loadGroups} />}
+              {currentPage === 'receiptScan' && <ReceiptScanPage onNavigate={handleNavigate} theme={theme} realGroupId={processingGroupId} onReceiptUploaded={(id) => setLastReceiptId(id)} />}
+              {currentPage === 'receiptItems' && <ReceiptItemsPage onNavigate={handleNavigate} theme={theme} setReceiptData={setReceiptData} setItemSplitData={setItemSplitData} receiptId={lastReceiptId} groupId={processingGroupId} />}
+              {currentPage === 'processing' && <ProcessingPaymentPage onNavigate={handleNavigate} theme={theme} groupId={processingGroupId} accountType={accountType} transactionId={currentTransactionId} receiptData={receiptData} itemSplitData={itemSplitData} />}
+              {currentPage === 'groupDetail' && <GroupDetailPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId} groups={groups} deleteGroup={deleteGroup} leaveGroup={leaveGroup} currentUserId={user?.id ?? ''} itemSplitData={itemSplitData} setItemSplitData={setItemSplitData} receiptData={receiptData} onStartProcessing={(txId) => { setCurrentTransactionId(txId); }} onGroupsChanged={loadGroups} />}
+              {currentPage === 'notifications' && <NotificationsPage onNavigate={handleNavigate} theme={theme} notifications={notifications} setNotifications={setNotifications} unreadCount={unreadNotificationCount} acceptInvite={acceptInvite} declineInvite={declineInvite} />}
+              {currentPage === 'notificationsSettings' && <NotificationsSettingsPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'privacySettings' && <PrivacySettingsPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'helpSupport' && <HelpSupportPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'appearanceSettings' && <AppearanceSettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} themePreference={themePreference} />}
+              {currentPage === 'changePassword' && <ChangePasswordPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'twoFactorAuth' && <TwoFactorAuthPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'acceptInvite' && <AcceptInvitePage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
+            </motion.div>
+          </AnimatePresence>
         )}
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-black rounded-full opacity-40" />
       </div>

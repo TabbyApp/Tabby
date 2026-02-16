@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { db } from '../db.js';
+import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
 export const usersRouter = Router();
@@ -10,19 +10,28 @@ function genId() {
 }
 
 // Get current user profile (single query via JSON aggregation - avoids 2 round-trips)
-usersRouter.get('/me', requireAuth, (req, res) => {
+usersRouter.get('/me', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
-  const row = db.prepare(`
-    SELECT u.id, u.email, u.name, COALESCE(u.phone, '') as phone, u.created_at, COALESCE(u.bank_linked, 0) as bank_linked,
-           (SELECT json_group_array(json_object('id', id, 'type', type, 'last_four', last_four, 'brand', brand, 'created_at', created_at))
-            FROM payment_methods WHERE user_id = u.id) as payment_methods_json
-    FROM users u WHERE u.id = ?
-  `).get(userId) as { id: string; email: string; name: string; phone: string; created_at: string; bank_linked: number; payment_methods_json: string } | undefined;
+  const { rows } = await query<{
+    id: string;
+    email: string;
+    name: string;
+    phone: string;
+    created_at: string;
+    bank_linked: boolean;
+    payment_methods_json: string | null;
+  }>(`
+    SELECT u.id, u.email, u.name, COALESCE(u.phone, '') as phone, u.created_at, COALESCE(u.bank_linked, false) as bank_linked,
+           (SELECT json_agg(json_build_object('id', id, 'type', type, 'last_four', last_four, 'brand', brand, 'created_at', created_at))
+            FROM payment_methods WHERE user_id = u.id)::text as payment_methods_json
+    FROM users u WHERE u.id = $1
+  `, [userId]);
+  const row = rows[0];
 
   if (!row) return res.status(404).json({ error: 'User not found' });
 
   let paymentMethods: { id: string; type: string; last_four: string; brand: string | null; created_at: string }[] = [];
-  if (row.payment_methods_json) {
+  if (row.payment_methods_json && row.payment_methods_json !== 'null') {
     try {
       const parsed = JSON.parse(row.payment_methods_json);
       paymentMethods = Array.isArray(parsed) ? parsed : (parsed != null ? [parsed] : []);
@@ -41,26 +50,27 @@ usersRouter.get('/me', requireAuth, (req, res) => {
 });
 
 // Update profile (name, email, phone)
-usersRouter.patch('/me', requireAuth, (req, res) => {
+usersRouter.patch('/me', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { name, email, phone } = req.body;
 
   const updates: string[] = [];
   const values: (string | number)[] = [];
+  let paramIdx = 1;
 
   if (typeof name === 'string' && name.trim()) {
-    updates.push('name = ?');
+    updates.push(`name = $${paramIdx++}`);
     values.push(name.trim());
   }
   if (typeof email === 'string' && email.trim()) {
     const emailLower = email.trim().toLowerCase();
-    const existing = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(emailLower, userId);
-    if (existing) return res.status(400).json({ error: 'Email already in use' });
-    updates.push('email = ?');
+    const { rows: existingRows } = await query<{ id: string }>('SELECT id FROM users WHERE email = $1 AND id != $2', [emailLower, userId]);
+    if (existingRows.length > 0) return res.status(400).json({ error: 'Email already in use' });
+    updates.push(`email = $${paramIdx++}`);
     values.push(emailLower);
   }
   if (typeof phone === 'string') {
-    updates.push('phone = ?');
+    updates.push(`phone = $${paramIdx++}`);
     values.push(phone.trim());
   }
 
@@ -68,30 +78,32 @@ usersRouter.patch('/me', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'No valid fields to update' });
   }
   values.push(userId);
-  db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
-  const updated = db.prepare(
-    'SELECT id, email, name, COALESCE(phone, \'\') as phone FROM users WHERE id = ?'
-  ).get(userId) as { id: string; email: string; name: string; phone: string };
-  res.json(updated);
+  await query(`UPDATE users SET ${updates.join(', ')} WHERE id = $${paramIdx}`, values);
+  const { rows: updatedRows } = await query<{ id: string; email: string; name: string; phone: string }>(
+    'SELECT id, email, name, COALESCE(phone, \'\') as phone FROM users WHERE id = $1',
+    [userId]
+  );
+  res.json(updatedRows[0]);
 });
 
 // Stub: link bank (MVP - no Plaid, just marks user as bank_linked)
-usersRouter.post('/link-bank', requireAuth, (req, res) => {
+usersRouter.post('/link-bank', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
-  db.prepare('UPDATE users SET bank_linked = 1 WHERE id = ?').run(userId);
+  await query('UPDATE users SET bank_linked = true WHERE id = $1', [userId]);
   // Also add a mock payment method so virtual cards can "charge"
-  const existing = db.prepare('SELECT 1 FROM payment_methods WHERE user_id = ? AND type = ?').get(userId, 'bank');
-  if (!existing) {
+  const { rows: existingRows } = await query<{ id: string }>('SELECT 1 FROM payment_methods WHERE user_id = $1 AND type = $2', [userId, 'bank']);
+  if (existingRows.length === 0) {
     const id = genId();
-    db.prepare(
-      'INSERT INTO payment_methods (id, user_id, type, last_four, brand) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, userId, 'bank', String(Math.floor(1000 + Math.random() * 9000)), null);
+    await query(
+      'INSERT INTO payment_methods (id, user_id, type, last_four, brand) VALUES ($1, $2, $3, $4, $5)',
+      [id, userId, 'bank', String(Math.floor(1000 + Math.random() * 9000)), null]
+    );
   }
   res.json({ ok: true, bank_linked: true });
 });
 
 // Add payment method (mock bank/card for prototype)
-usersRouter.post('/payment-methods', requireAuth, (req, res) => {
+usersRouter.post('/payment-methods', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { type, lastFour, brand } = req.body;
 
@@ -106,10 +118,13 @@ usersRouter.post('/payment-methods', requireAuth, (req, res) => {
   }
 
   const id = genId();
-  db.prepare(
-    'INSERT INTO payment_methods (id, user_id, type, last_four, brand) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, userId, type, lastFour, type === 'card' ? (brand || 'Visa') : null);
-
-  const row = db.prepare('SELECT id, type, last_four, brand, created_at FROM payment_methods WHERE id = ?').get(id);
-  res.status(201).json(row);
+  await query(
+    'INSERT INTO payment_methods (id, user_id, type, last_four, brand) VALUES ($1, $2, $3, $4, $5)',
+    [id, userId, type, lastFour, type === 'card' ? (brand || 'Visa') : null]
+  );
+  const { rows } = await query<{ id: string; type: string; last_four: string; brand: string | null; created_at: string }>(
+    'SELECT id, type, last_four, brand, created_at FROM payment_methods WHERE id = $1',
+    [id]
+  );
+  res.status(201).json(rows[0]);
 });
