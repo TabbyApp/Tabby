@@ -369,7 +369,7 @@ main.tsx → AuthProvider → App
 App:
   showSplash? → SplashScreen
   !isAuthenticated → LoginSignup
-  !user.bank_linked → LinkBankPage
+  Users can link their bank from the Account page
   else → Main app (pages)
 ```
 
@@ -430,8 +430,8 @@ ProcessingPaymentPage
 ```ts
 type PageState = {
   page: 'home' | 'groups' | 'groupDetail' | 'activity' | 'create' | 'account' | 'settings' |
-        'wallet' | 'cardDetails' | 'createGroup' | 'linkBank' | 'receiptScan' | 'receiptItems' |
-        'processing' | 'transactionAllocation';
+        'wallet' | 'cardDetails' | 'createGroup' | 'receiptScan' | 'receiptItems' |
+        'processing';
   groupId?: string;
   transactionId?: string;
   receiptId?: string;
@@ -445,7 +445,7 @@ type PageState = {
 |---------------------|----------------------------------|-------------------------------------------------------|
 | GroupDetailPage     | group, receipts, transactions    | Toggle Even/Item, upload receipt, set tip, confirm    |
 | ReceiptItemsPage    | transaction or receipt           | Toggle claims, confirm (creator)                      |
-| ProcessingPaymentPage | splits from nav state          | Animate, redirect to groupDetail                      |
+| ProcessingPaymentPage | splits from nav state          | Calls api.transactions.settle(); animate, redirect to groupDetail |
 | ActivityPage        | transactions.activity/me         | History of user's allocations                         |
 
 ---

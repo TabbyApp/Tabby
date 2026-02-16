@@ -1,814 +1,963 @@
-import { useCallback, useEffect, useState, useRef } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
-import { ChevronLeft, Users, CreditCard, Upload, Receipt, DollarSign, Clock, UserPlus, Copy, Check, X, Trash2, LogOut, MoreHorizontal, UserMinus } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
-import { api } from '../lib/api';
+import { motion, AnimatePresence } from 'motion/react';
+import { ChevronLeft, Users, Receipt, Trash2, UserMinus, LogOut, Plus, MoreVertical, UserPlus, DollarSign, Check, Copy, Link2 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { PageType } from '../App';
+import { BottomNavigation } from './BottomNavigation';
+import { ProfileSheet } from './ProfileSheet';
 import { useAuth } from '../contexts/AuthContext';
-import type { PageType, PageState } from '../App';
-
-type SplitMode = 'EVEN_SPLIT' | 'FULL_CONTROL';
+import { api } from '../lib/api';
+import { getCachedGroupDetail, setCachedGroupDetail, invalidateGroupCache } from '../lib/groupCache';
 
 interface GroupDetailPageProps {
-  groupId: string;
-  onNavigate: (target: PageType | PageState) => void;
+  onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
+  groupId: string | null;
+  groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
+  deleteGroup: (groupId: string) => void;
+  leaveGroup: (groupId: string) => void;
+  currentUserId: string;
+  itemSplitData: { hasSelectedItems: boolean; yourItemsTotal: number };
+  setItemSplitData: (data: { hasSelectedItems: boolean; yourItemsTotal: number }) => void;
+  receiptData?: { members: Array<{ id: number; name: string; amount: number; avatar: string }>; total: number } | null;
+  onStartProcessing?: (transactionId: string) => void;
+  onGroupsChanged?: () => void;
 }
 
-type GroupReceipt = {
-  id: string;
-  status: string;
-  total: number | null;
-  created_at: string;
-  splits: { user_id: string; amount: number; status: string; name: string }[];
-};
+const AVATAR_COLORS = [
+  'from-violet-500 to-purple-600',
+  'from-pink-500 to-rose-600',
+  'from-blue-500 to-indigo-600',
+  'from-amber-500 to-orange-600',
+  'from-green-500 to-emerald-600',
+  'from-teal-500 to-cyan-600',
+];
 
-const MAX_VISIBLE_AVATARS = 3;
-
-export function GroupDetailPage({ groupId, onNavigate, theme }: GroupDetailPageProps) {
-  const isDark = theme === 'dark';
+export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGroup, leaveGroup, currentUserId, itemSplitData, setItemSplitData, receiptData, onStartProcessing, onGroupsChanged }: GroupDetailPageProps) {
   const { user } = useAuth();
-  const [group, setGroup] = useState<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string }[]; cardLastFour: string | null; inviteToken: string | null } | null>(null);
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [membersOpen, setMembersOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [receipts, setReceipts] = useState<GroupReceipt[]>([]);
-  const [activeTx, setActiveTx] = useState<{ id: string; status: string; split_mode: string; subtotal?: number | null; tip_amount?: number; allocation_deadline_at: string | null; receipt_id?: string | null } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [splitMode, setSplitMode] = useState<SplitMode>('EVEN_SPLIT');
-  const [tipAmount, setTipAmount] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const [creatingTx, setCreatingTx] = useState(false);
-  const [fullTxDetails, setFullTxDetails] = useState<{
-    items: { id: string; name: string; price: number }[];
-    claims: Record<string, string[]>;
-    members: { id: string; name: string; email: string }[];
-    tip_amount: number;
-    subtotal: number;
-  } | null>(null);
-  const [fullTipAmount, setFullTipAmount] = useState(0);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<'delete' | 'leave' | 'remove' | null>(null);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [removingMember, setRemovingMember] = useState<string | null>(null);
-  const [memberToRemove, setMemberToRemove] = useState<{ id: string; name: string } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [showRemoveMemberModal, setShowRemoveMemberModal] = useState(false);
+  const [showInviteSheet, setShowInviteSheet] = useState(false);
+  const [selectedMember, setSelectedMember] = useState<any>(null);
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
+  const [showMembersDropdown, setShowMembersDropdown] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  
+  const [splitMode, setSplitMode] = useState<'even' | 'item'>(receiptData ? 'item' : 'even');
+  const [tipPercentage, setTipPercentage] = useState(15);
+  const [hasReceipt, setHasReceipt] = useState(false);
+  const [receiptTotal, setReceiptTotal] = useState(0);
+  const [settlingPayment, setSettlingPayment] = useState(false);
+  
+  const hasSelectedItems = itemSplitData.hasSelectedItems;
+  const yourItemsTotal = itemSplitData.yourItemsTotal;
+  
+  useEffect(() => {
+    if (receiptData && receiptData.members.length > 0) {
+      setSplitMode('item');
+    }
+  }, [receiptData]);
+  
+  const isDark = theme === 'dark';
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError(null);
+  const currentGroup = groups.find(g => g.id === groupId);
+
+  // Use shared prefetch cache - data may already be available from App.tsx prefetch
+  const cached = groupId ? getCachedGroupDetail(groupId) : null;
+
+  const [realMembers, setRealMembers] = useState<{ id: string; name: string; email: string }[]>(
+    cached?.members ?? []
+  );
+  const [realCreatedBy, setRealCreatedBy] = useState<string>(
+    cached?.createdBy ?? ''
+  );
+  const [realReceipts, setRealReceipts] = useState<any[]>(
+    cached?.receipts ?? []
+  );
+  const [inviteToken, setInviteToken] = useState<string | null>(
+    cached?.inviteToken ?? null
+  );
+
+  // Track which groupId we've loaded for, to avoid double-fetching
+  const loadedGroupRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!groupId) return;
+    // If we have fresh cached data from prefetch, use it and skip the API call
+    const freshCache = getCachedGroupDetail(groupId);
+    if (freshCache && loadedGroupRef.current === groupId) return;
+    
+    // Apply cache immediately if available (before API returns)
+    if (freshCache) {
+      setRealMembers(freshCache.members);
+      setRealCreatedBy(freshCache.createdBy);
+      setInviteToken(freshCache.inviteToken);
+      setRealReceipts(freshCache.receipts);
+      const latestCached = freshCache.receipts.find((r: any) => r.total != null);
+      if (latestCached?.total) {
+        setReceiptTotal(latestCached.total);
+        setHasReceipt(true);
+      }
+      loadedGroupRef.current = groupId;
+      return; // Cache is fresh, no need to refetch
+    }
+
+    loadedGroupRef.current = groupId;
+
+    // No cache - fetch both in parallel
     Promise.all([
-      api.groups.get(groupId),
-      api.receipts.list(groupId),
-      api.transactions.list(groupId).catch(() => []),
-    ])
-      .then(([groupData, receiptData, txs]) => {
-        setGroup(groupData);
-        setReceipts(receiptData);
-        const pending = Array.isArray(txs) ? txs.find((t) => t.status === 'PENDING_ALLOCATION') : null;
-        setActiveTx(pending ?? null);
-        // Trigger refetch of FULL_CONTROL details (claims may have changed)
-        setFullTxRefreshKey((k) => k + 1);
-      })
-      .catch((err) => {
-        setGroup(null);
-        setReceipts([]);
-        setActiveTx(null);
-        setError(err instanceof Error ? err.message : 'Failed to load group');
-      })
-      .finally(() => setLoading(false));
+      api.groups.get(groupId).catch(() => null),
+      api.receipts.list(groupId).catch(() => [] as any[]),
+    ]).then(([groupData, receiptsData]) => {
+      if (groupData) {
+        setRealMembers(groupData.members);
+        setRealCreatedBy(groupData.created_by);
+        setInviteToken(groupData.inviteToken);
+      }
+      const receipts = receiptsData ?? [];
+      setRealReceipts(receipts);
+      const latest = receipts.find((r: any) => r.total != null);
+      if (latest && latest.total) {
+        setReceiptTotal(latest.total);
+        setHasReceipt(true);
+      }
+      // Store in shared cache
+      if (groupData) {
+        setCachedGroupDetail(groupId, {
+          members: groupData.members,
+          createdBy: groupData.created_by,
+          inviteToken: groupData.inviteToken,
+          receipts,
+        });
+      }
+    });
   }, [groupId]);
 
-  useEffect(() => { load(); }, [load]);
+  const isCreator = realCreatedBy ? realCreatedBy === user?.id : currentGroup?.createdBy === currentUserId;
 
-  const evenTx = activeTx?.split_mode === 'EVEN_SPLIT' ? activeTx : null;
-  const fullTx = activeTx?.split_mode === 'FULL_CONTROL' ? activeTx : null;
+  // Build member avatars from real data
+  const memberAvatars = realMembers.length > 0
+    ? realMembers.map((m, i) => {
+        const isMe = m.id === user?.id;
+        const initials = isMe ? 'ME' : (m.name.charAt(0) + (m.name.split(' ')[1]?.charAt(0) || '')).toUpperCase();
+        return {
+          id: i + 1,
+          name: isMe ? 'You' : m.name,
+          initials,
+          color: AVATAR_COLORS[i % AVATAR_COLORS.length],
+          _realId: m.id,
+        };
+      })
+    : [{ id: 1, name: 'You', initials: 'ME', color: AVATAR_COLORS[0], _realId: user?.id ?? '' }];
 
-  useEffect(() => {
-    if (evenTx?.tip_amount != null) setTipAmount(evenTx.tip_amount);
-  }, [evenTx?.id, evenTx?.tip_amount]);
+  const visibleAvatars = memberAvatars.slice(0, 3);
+  const remainingCount = Math.max(0, memberAvatars.length - 3);
 
-  // Fetch full transaction details (items, claims) for FULL_CONTROL breakdown
-  const [fullTxRefreshKey, setFullTxRefreshKey] = useState(0);
-  useEffect(() => {
-    if (fullTx?.id && fullTx.receipt_id) {
-      api.transactions.get(fullTx.id).then((data) => {
-        setFullTxDetails({
-          items: data.items,
-          claims: data.claims || {},
-          members: data.members,
-          tip_amount: data.tip_amount ?? 0,
-          subtotal: data.subtotal ?? 0,
-        });
-        setFullTipAmount(data.tip_amount ?? 0);
-      }).catch(() => {});
-    } else {
-      setFullTxDetails(null);
-    }
-  }, [fullTx?.id, fullTx?.receipt_id, fullTxRefreshKey]);
+  const tipAmount = splitMode === 'even' 
+    ? (receiptTotal * tipPercentage / 100)
+    : (yourItemsTotal * tipPercentage / 100);
+  
+  const totalWithTip = splitMode === 'even'
+    ? receiptTotal + tipAmount
+    : yourItemsTotal + tipAmount;
+  
+  const yourShare = splitMode === 'even'
+    ? (memberAvatars.length > 0 ? totalWithTip / memberAvatars.length : totalWithTip)
+    : totalWithTip;
 
-  if (error) {
-    return (
-      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center px-6 ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
-        <p className={`text-center mb-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{error}</p>
-        <div className="flex gap-3">
-          <button onClick={() => onNavigate('groups')} className={`px-4 py-2 rounded-xl font-medium ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-800'}`}>Go back</button>
-          <button onClick={load} className="px-4 py-2 rounded-xl font-medium bg-blue-500 text-white">Retry</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading || !group) {
-    return (
-      <div className={`h-[calc(100vh-48px-24px)] flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
-        <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>Loading...</p>
-      </div>
-    );
-  }
-
-  const isCreator = group.created_by === user?.id;
-  const extractedTotal = evenTx?.subtotal ?? 0;
-  const hasTotal = extractedTotal > 0;
-
-  const visibleMembers = group.members.slice(0, MAX_VISIBLE_AVATARS);
-  const overflowCount = group.members.length - MAX_VISIBLE_AVATARS;
-
-  const handleEvenConfirm = async () => {
-    if (!isCreator || !evenTx) return;
-    setSubmitting(true);
-    try {
-      await api.transactions.setTip(evenTx.id, tipAmount);
-      const { allocations } = await api.transactions.finalize(evenTx.id);
-      onNavigate({ page: 'processing', groupId, transactionId: evenTx.id, splits: allocations });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to complete payment');
-    } finally {
-      setSubmitting(false);
-    }
+  const baseGroup = {
+    id: groupId ?? '',
+    name: currentGroup?.name ?? 'Group',
+    balance: currentGroup?.balance ?? 0,
+    yourBalance: 0,
+    transactions: realReceipts.map((r, i) => ({
+      id: i + 1,
+      description: `Receipt ${i + 1}`,
+      amount: r.total ?? 0,
+      date: (() => {
+        const d = new Date(r.created_at);
+        const diffH = Math.floor((Date.now() - d.getTime()) / 3600000);
+        return diffH < 1 ? 'just now' : diffH < 24 ? `${diffH}h ago` : `${Math.floor(diffH / 24)}d ago`;
+      })(),
+      type: 'expense',
+      receipts: 1,
+    })),
   };
 
-  const handleFullControlConfirm = async () => {
-    if (!isCreator || !fullTx) return;
-    setSubmitting(true);
-    try {
-      await api.transactions.setTip(fullTx.id, fullTipAmount);
-      const { allocations } = await api.transactions.finalize(fullTx.id);
-      onNavigate({ page: 'processing', groupId, transactionId: fullTx.id, splits: allocations });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to complete payment');
-    } finally {
-      setSubmitting(false);
-    }
+  const [removedMembers, setRemovedMembers] = useState<number[]>([]);
+
+  const handleRemoveMember = (member: any) => {
+    setSelectedMember(member);
+    setShowRemoveMemberModal(true);
+    setShowMenu(false);
   };
 
-  const handleUploadReceipt = async (file: File | null) => {
-    if (!file || !isCreator) return;
-    setCreatingTx(true);
-    setError(null);
-    try {
-      const tx = (splitMode === 'EVEN_SPLIT' ? evenTx : fullTx) ?? (await api.transactions.create(groupId, splitMode));
-      const result = await api.transactions.uploadReceipt(tx.id, file);
-      if (result?.receipt_id) {
-        await load();
-        if (splitMode === 'FULL_CONTROL') {
-          onNavigate({ page: 'receiptItems', groupId, transactionId: tx.id, receiptId: result.receipt_id });
-        }
+  const confirmRemoveMember = () => {
+    if (selectedMember) {
+      setRemovedMembers([...removedMembers, selectedMember.id]);
+      if (groupId && selectedMember._realId) {
+        if (groupId) invalidateGroupCache(groupId);
+        api.groups.removeMember(groupId, selectedMember._realId)
+          .then(() => onGroupsChanged?.())
+          .catch(() => {});
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to upload');
-    } finally {
-      setCreatingTx(false);
+      setShowRemoveMemberModal(false);
+      setSelectedMember(null);
     }
   };
 
-  const handleDeleteGroup = async () => {
-    setActionLoading(true);
-    try {
-      await api.groups.deleteGroup(groupId);
+  const handleDeleteGroup = () => {
+    if (groupId) {
+      deleteGroup(groupId);
+    }
+    setShowDeleteModal(false);
+    setTimeout(() => {
       onNavigate('groups');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete group');
-      setConfirmAction(null);
-    } finally {
-      setActionLoading(false);
-    }
+    }, 100);
   };
 
-  const handleLeaveGroup = async () => {
-    setActionLoading(true);
-    try {
-      await api.groups.leaveGroup(groupId);
+  const handleLeaveGroup = () => {
+    if (groupId) {
+      leaveGroup(groupId);
+    }
+    setShowLeaveModal(false);
+    setTimeout(() => {
       onNavigate('groups');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to leave group');
-      setConfirmAction(null);
-    } finally {
-      setActionLoading(false);
+    }, 100);
+  };
+
+  const handleAddReceipt = () => {
+    if (splitMode === 'even') {
+      setHasReceipt(true);
+    } else {
+      onNavigate('receiptScan', groupId!);
     }
   };
 
-  const confirmRemoveMember = (member: { id: string; name: string }) => {
-    setMemberToRemove(member);
-    setConfirmAction('remove');
-  };
-
-  const handleRemoveMember = async () => {
-    if (!memberToRemove) return;
-    setActionLoading(true);
+  const handleCompletePayment = async () => {
+    if (!groupId || settlingPayment) return;
+    setSettlingPayment(true);
     try {
-      await api.groups.removeMember(groupId, memberToRemove.id);
-      setConfirmAction(null);
-      setMemberToRemove(null);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to remove member');
-      setConfirmAction(null);
-      setMemberToRemove(null);
+      // Create a transaction on the backend
+      const splitModeApi = splitMode === 'even' ? 'EVEN_SPLIT' : 'FULL_CONTROL';
+      const tx = await api.transactions.create(groupId, splitModeApi);
+      
+      // Set tip
+      if (tipPercentage > 0) {
+        await api.transactions.setTip(tx.id, tipAmount);
+      }
+      
+      // If even split with a known subtotal, set it
+      if (splitMode === 'even' && receiptTotal > 0) {
+        await api.transactions.setSubtotal(tx.id, receiptTotal).catch(() => {});
+      }
+      
+      // Finalize the transaction
+      await api.transactions.finalize(tx.id);
+      
+      // Notify parent about the transaction
+      onStartProcessing?.(tx.id);
+      
+      // Navigate to processing page
+      onNavigate('processing', groupId);
+    } catch (err) {
+      console.error('Payment failed:', err);
+      // Still navigate to processing for UX
+      onNavigate('processing', groupId);
     } finally {
-      setActionLoading(false);
+      setSettlingPayment(false);
     }
   };
 
-  const inviteLink = group.inviteToken ? `${window.location.origin}/?invite=${group.inviteToken}` : '';
+  const inviteLink = inviteToken 
+    ? `${window.location.origin}/join/${inviteToken}`
+    : '';
+
+  const handleCopyInviteLink = () => {
+    if (!inviteLink) return;
+    navigator.clipboard?.writeText(inviteLink).catch(() => {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = inviteLink;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    });
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
       {/* Header */}
-      <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}>
-        <div className="flex items-center justify-between gap-3 mb-2">
-          <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => onNavigate('groups')} className={`w-9 h-9 rounded-full flex-shrink-0 ${isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center active:scale-95 transition-transform`}>
-              <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-slate-800'} strokeWidth={2.5} />
-            </button>
-            <h1 className={`text-2xl font-bold truncate ${isDark ? 'text-white' : 'text-slate-800'}`}>{group.name}</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className={`flex-shrink-0 rounded-full p-0.5 ${isDark ? 'bg-slate-700' : 'bg-slate-100'}`}>
-              <button onClick={() => setSplitMode('EVEN_SPLIT')} className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${splitMode === 'EVEN_SPLIT' ? 'bg-white shadow-sm text-slate-800' : isDark ? 'text-slate-400' : 'text-slate-600'}`}>Even</button>
-              <button onClick={() => setSplitMode('FULL_CONTROL')} className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${splitMode === 'FULL_CONTROL' ? 'bg-white shadow-sm text-slate-800' : isDark ? 'text-slate-400' : 'text-slate-600'}`}>Item split</button>
-            </div>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setMenuOpen(!menuOpen)}
-                className={`w-9 h-9 rounded-full flex items-center justify-center active:scale-95 transition-transform ${isDark ? 'bg-slate-700' : 'bg-gray-100'}`}
-              >
-                <MoreHorizontal size={18} className={isDark ? 'text-white' : 'text-slate-600'} />
-              </button>
-              <AnimatePresence>
-                {menuOpen && (
-                  <>
-                    <div className="fixed inset-0 z-20" onClick={() => setMenuOpen(false)} />
-                    <motion.div
-                      initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                      transition={{ type: 'spring', damping: 25, stiffness: 400 }}
-                      className={`absolute top-11 right-0 z-30 rounded-xl shadow-xl border min-w-[180px] overflow-hidden ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'}`}
-                    >
-                      {isCreator ? (
-                        <button
-                          type="button"
-                          onClick={() => { setMenuOpen(false); setConfirmAction('delete'); }}
-                          className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-500 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-red-50'} transition-colors`}
-                        >
-                          <Trash2 size={16} />
-                          Delete Group
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => { setMenuOpen(false); setConfirmAction('leave'); }}
-                          className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-red-500 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-red-50'} transition-colors`}
-                        >
-                          <LogOut size={16} />
-                          Leave Group
-                        </button>
-                      )}
-                    </motion.div>
-                  </>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-        </div>
-        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{group.members.length} member{group.members.length !== 1 ? 's' : ''}</p>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-5 py-6 space-y-4" style={{ WebkitOverflowScrolling: 'touch' }}>
-        {/* Member avatars row + Invite */}
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setMembersOpen(!membersOpen)}
-              className="flex items-center active:scale-95 transition-transform"
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.12 }}
+        className={`${isDark ? 'bg-slate-800/95 border-slate-700' : 'bg-white/95 border-slate-200'} backdrop-blur-xl border-b px-5 py-4`}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => onNavigate('groups')}
+              className={`w-10 h-10 rounded-[14px] ${isDark ? 'bg-slate-700/80' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform`}
             >
-              <div className="flex -space-x-2">
-                {visibleMembers.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold border-2 border-green-400 shadow-sm transition-all ${
-                      isDark ? 'bg-slate-700 text-white' : 'bg-white text-slate-700'
-                    }`}
-                  >
-                    {m.name.charAt(0).toUpperCase()}
-                  </div>
-                ))}
-                {overflowCount > 0 && (
-                  <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold border-2 shadow-sm ${
-                      isDark ? 'bg-slate-600 border-slate-500 text-slate-200' : 'bg-slate-100 border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    +{overflowCount}
-                  </div>
-                )}
-              </div>
+              <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-purple-600'} strokeWidth={2.5} />
             </button>
-
-            {/* Members dropdown */}
-            <AnimatePresence>
-              {membersOpen && (
-                <>
-                  <div className="fixed inset-0 z-20" onClick={() => setMembersOpen(false)} />
-                  <motion.div
-                    initial={{ opacity: 0, y: -8, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: -8, scale: 0.95 }}
-                    transition={{ type: 'spring', damping: 25, stiffness: 400 }}
-                    className={`absolute top-12 left-0 z-30 rounded-2xl shadow-xl border p-2 min-w-[220px] ${
-                      isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-100'
-                    }`}
-                  >
-                    <p className={`text-[11px] font-semibold uppercase tracking-wider px-3 pt-2 pb-1.5 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>
-                      {group.members.length} member{group.members.length !== 1 ? 's' : ''}
-                    </p>
-                    {group.members.map((m, i) => (
-                      <motion.div
-                        key={m.id}
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.03 }}
-                        className={`flex items-center gap-2.5 py-2 px-3 rounded-xl ${isDark ? 'hover:bg-slate-700/60' : 'hover:bg-slate-50'} transition-colors`}
-                      >
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold border-[1.5px] border-green-400 ${isDark ? 'bg-slate-700 text-white' : 'bg-white text-slate-700'}`}>
-                          {m.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-sm font-medium truncate ${isDark ? 'text-white' : 'text-slate-800'}`}>{m.name}</p>
-                        </div>
-                        {m.id === group.created_by ? (
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${isDark ? 'bg-purple-500/20 text-purple-300' : 'bg-purple-50 text-purple-500'}`}>Host</span>
-                        ) : isCreator ? (
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); setMembersOpen(false); confirmRemoveMember(m); }}
-                            className={`p-1 rounded-full transition-colors ${isDark ? 'hover:bg-red-500/20' : 'hover:bg-red-50'}`}
-                            title="Remove"
-                          >
-                            <X size={14} className="text-red-400" />
-                          </button>
-                        ) : null}
-                      </motion.div>
-                    ))}
-                  </motion.div>
-                </>
-              )}
-            </AnimatePresence>
+            <div>
+              <h1 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {baseGroup.name}
+              </h1>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setInviteOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all active:scale-95 bg-blue-500 text-white hover:bg-blue-600"
+          <button 
+            onClick={() => setShowMenu(!showMenu)}
+            className={`w-10 h-10 rounded-[14px] ${isDark ? 'bg-slate-700/80' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform relative`}
           >
-            <UserPlus size={16} />
-            Invite
+            <MoreVertical size={18} className={isDark ? 'text-white' : 'text-purple-600'} />
           </button>
-        </div>
-
-        {/* Invite bottom sheet */}
-        <AnimatePresence>
-          {inviteOpen && (
-            <div className="fixed inset-0 z-40 flex items-end justify-center" onClick={() => setInviteOpen(false)}>
+          
+          {/* Dropdown Menu */}
+          {showMenu && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
               <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.2 }}
-                className="absolute inset-0 bg-black/40"
-              />
-              <motion.div
-                initial={{ y: '100%' }}
-                animate={{ y: 0 }}
-                exit={{ y: '100%' }}
-                transition={{ type: 'spring', damping: 30, stiffness: 350 }}
-                className={`relative z-50 w-full max-w-[430px] rounded-t-[24px] px-6 pt-3 pb-10 ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-                onClick={(e) => e.stopPropagation()}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className={`absolute right-5 top-20 w-56 ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl shadow-2xl overflow-hidden z-20 border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
               >
-                {/* Drag handle */}
-                <div className="flex justify-center mb-4">
-                  <div className={`w-9 h-[5px] rounded-full ${isDark ? 'bg-slate-600' : 'bg-slate-200'}`} />
-                </div>
-
-                <div className="flex items-center justify-between mb-5">
-                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Invite to {group.name}</h3>
-                  <button
-                    type="button"
-                    onClick={() => setInviteOpen(false)}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${isDark ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-100 hover:bg-slate-200'}`}
+                {!isCreator && (
+                  <button 
+                    onClick={() => { setShowLeaveModal(true); setShowMenu(false); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-gray-50'} transition-colors border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}`}
                   >
-                    <X size={16} className={isDark ? 'text-slate-300' : 'text-slate-500'} />
+                    <LogOut size={18} className="text-orange-500" />
+                    <span className="text-sm font-medium text-orange-500">Leave Group</span>
                   </button>
-                </div>
-
-                <p className={`text-xs font-semibold uppercase tracking-wider mb-2 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Share link</p>
-                <div className="mb-5">
-                  <input
-                    readOnly
-                    value={inviteLink}
-                    className={`w-full px-3.5 py-2.5 rounded-xl text-sm font-mono mb-3 ${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-50 text-slate-600'}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard.writeText(inviteLink);
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
-                    className={`w-full py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-95 ${
-                      copied ? 'bg-green-500 text-white' : 'bg-blue-500 text-white hover:bg-blue-600'
-                    }`}
+                )}
+                {isCreator && (
+                  <button 
+                    onClick={() => { setShowDeleteModal(true); setShowMenu(false); }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-gray-50'} transition-colors`}
                   >
-                    {copied ? <Check size={18} /> : <Copy size={18} />}
-                    {copied ? 'Copied!' : 'Copy Link'}
+                    <Trash2 size={18} className="text-red-500" />
+                    <span className="text-sm font-medium text-red-500">Delete Group</span>
                   </button>
-                </div>
-
-                {group.inviteToken && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.15 }}
-                    className="flex flex-col items-center"
-                  >
-                    <p className={`text-xs font-semibold uppercase tracking-wider mb-3 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Or scan QR code</p>
-                    <div className="p-5 rounded-2xl bg-white shadow-sm">
-                      <QRCodeSVG value={inviteLink} size={180} />
-                    </div>
-                  </motion.div>
                 )}
               </motion.div>
-            </div>
+            </>
           )}
-        </AnimatePresence>
-
-        {/* Virtual Card */}
-        <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center">
-              <CreditCard size={20} className="text-white" />
-            </div>
-            <div>
-              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Virtual Card</p>
-              <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>•••• •••• •••• {group.cardLastFour || '----'}</p>
-            </div>
-          </div>
-          <button onClick={() => onNavigate('wallet')} className="text-blue-500 text-sm font-medium">View in Wallet</button>
         </div>
 
-        {/* Members list */}
-        <div>
-          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-2`}>Members</h2>
-          <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
-            {group.members.map((m, i) => (
-              <div key={m.id} className={`flex items-center gap-3 p-4 ${i > 0 ? `border-t ${isDark ? 'border-slate-700' : 'border-gray-100'}` : ''}`}>
-                <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center`}>
-                  <Users size={18} className={isDark ? 'text-slate-400' : 'text-slate-600'} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className={`font-medium truncate ${isDark ? 'text-white' : 'text-slate-800'}`}>{m.name}</p>
-                    {m.id === group.created_by && (
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 ${isDark ? 'bg-purple-500/20 text-purple-300' : 'bg-purple-50 text-purple-500'}`}>Host</span>
-                    )}
-                  </div>
-                  <p className={`text-sm truncate ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{m.email}</p>
-                </div>
-                {isCreator && m.id !== user?.id && (
-                  <button
-                    type="button"
-                    onClick={() => confirmRemoveMember(m)}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors active:scale-95 ${
-                      isDark ? 'hover:bg-red-500/20' : 'hover:bg-red-50'
-                    }`}
-                    title="Remove member"
+        {/* Split Mode Toggle */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.12 }}
+          className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-100/80'} rounded-[16px] p-1 flex gap-1`}
+        >
+          <button
+            onClick={() => setSplitMode('even')}
+            className={`flex-1 py-2.5 rounded-[12px] font-semibold text-[15px] transition-all ${
+              splitMode === 'even'
+                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
+                : `${isDark ? 'text-slate-400' : 'text-slate-600'}`
+            }`}
+          >
+            Split Evenly
+          </button>
+          <button
+            onClick={() => setSplitMode('item')}
+            className={`flex-1 py-2.5 rounded-[12px] font-semibold text-[15px] transition-all ${
+              splitMode === 'item'
+                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
+                : `${isDark ? 'text-slate-400' : 'text-slate-600'}`
+            }`}
+          >
+            Item Split
+          </button>
+        </motion.div>
+      </motion.div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        {/* Members with Invite Button */}
+        <motion.div
+          initial={{ y: 10, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[20px] p-4 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5 relative`}
+        >
+          <div className="flex items-center justify-between">
+            <button 
+              onClick={() => setShowMembersDropdown(!showMembersDropdown)}
+              className="flex items-center gap-3 active:scale-95 transition-transform"
+            >
+              <div className="flex items-center">
+                {visibleAvatars.map((avatar, index) => (
+                  <div
+                    key={avatar.id}
+                    className={`w-10 h-10 rounded-full bg-gradient-to-br ${avatar.color} flex items-center justify-center text-white text-xs font-bold shadow-lg border-2 ${isDark ? 'border-slate-800' : 'border-white'}`}
+                    style={{ marginLeft: index > 0 ? '-12px' : '0', zIndex: visibleAvatars.length - index }}
                   >
-                    <UserMinus size={15} className="text-red-400" />
-                  </button>
+                    {avatar.initials}
+                  </div>
+                ))}
+                {remainingCount > 0 && (
+                  <div
+                    className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-200'} flex items-center justify-center text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'} shadow-lg border-2 ${isDark ? 'border-slate-800' : 'border-white'}`}
+                    style={{ marginLeft: '-12px', zIndex: 0 }}
+                  >
+                    +{remainingCount}
+                  </div>
                 )}
               </div>
-            ))}
+              <div>
+                <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  {memberAvatars.length} members
+                </p>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  in this group
+                </p>
+              </div>
+            </button>
+            <button 
+              onClick={() => setShowInviteSheet(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm shadow-lg shadow-purple-500/30 active:scale-95 transition-transform"
+            >
+              <UserPlus size={16} strokeWidth={2.5} />
+              Invite
+            </button>
           </div>
-        </div>
 
-        {/* Split modes */}
-        <AnimatePresence mode="wait">
-          {splitMode === 'EVEN_SPLIT' ? (
-            <motion.div key="even" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }} className="space-y-4">
-              <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/jpg" className="hidden" onChange={(e) => { handleUploadReceipt(e.target.files?.[0] || null); e.target.value = ''; }} />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!isCreator || creatingTx}
-                className={`w-full py-4 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-60 ${
-                  hasTotal ? 'border-2 border-dashed border-purple-500 bg-purple-500/10 text-purple-600' : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
-                }`}
-              >
-                <Upload size={22} strokeWidth={2.5} />
-                {creatingTx ? 'Uploading...' : hasTotal ? 'Replace receipt' : 'Upload Receipt'}
-              </button>
-              {!hasTotal && (
-                <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Upload a receipt to start splitting</p>
-              )}
-              {hasTotal && (
-                <>
-                  <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
-                    <p className={`text-sm font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Total</p>
-                    <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>${extractedTotal.toFixed(2)}</p>
-                    <p className={`text-sm font-medium mb-3 mt-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Tip</p>
-                    <div className="flex items-center gap-4">
-                      <input type="range" min="0" max={Math.max(50, Math.ceil(extractedTotal * 0.3))} step="0.5" value={tipAmount} onChange={(e) => setTipAmount(parseFloat(e.target.value) || 0)} disabled={!isCreator} className="flex-1" />
-                      <span className={`font-bold w-16 text-right ${isDark ? 'text-white' : 'text-slate-800'}`}>${tipAmount.toFixed(2)}</span>
-                    </div>
-                    <div className={`mt-4 pt-4 border-t ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
-                      <div className="flex justify-between">
-                        <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Split among {group.members.length}</span>
-                        <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>${((extractedTotal + tipAmount) / group.members.length).toFixed(2)} each</span>
-                      </div>
-                    </div>
+          {/* Members Dropdown */}
+          <AnimatePresence>
+            {showMembersDropdown && (
+              <>
+                <div 
+                  className="fixed inset-0 z-30" 
+                  onClick={() => setShowMembersDropdown(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                  transition={{ duration: 0.2 }}
+                  className={`absolute left-4 right-4 top-[calc(100%+8px)] ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl shadow-2xl overflow-hidden z-40 border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
+                >
+                  <div className={`px-4 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
+                    <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      All Members ({memberAvatars.length})
+                    </p>
                   </div>
-                  {evenTx?.allocation_deadline_at && (
-                    <div className="flex items-center gap-2 text-sm text-amber-600">
-                      <Clock size={16} />
-                      <span>Deadline: {new Date(evenTx.allocation_deadline_at).toLocaleTimeString()}</span>
-                    </div>
-                  )}
-                  {isCreator && (
-                    <button onClick={handleEvenConfirm} disabled={submitting} className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2">
-                      <DollarSign size={22} strokeWidth={2.5} />
-                      {submitting ? 'Processing...' : 'Confirm & Pay'}
-                    </button>
-                  )}
-                </>
-              )}
-            </motion.div>
-          ) : (
-            <motion.div key="full" initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} className="space-y-4">
-              <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/jpg" className="hidden" onChange={(e) => { handleUploadReceipt(e.target.files?.[0] || null); e.target.value = ''; }} />
-              {fullTx?.receipt_id ? (
-                <>
-                  {/* Assign / Edit selections button */}
-                  <button onClick={() => onNavigate({ page: 'receiptItems', groupId, transactionId: fullTx.id, receiptId: fullTx.receipt_id! })} className={`w-full py-3 rounded-xl font-semibold flex items-center justify-center gap-2 ${
-                    fullTxDetails && fullTxDetails.items.length > 0 && fullTxDetails.items.every((item) => (fullTxDetails.claims[item.id] || []).length > 0)
-                      ? `border-2 border-purple-500 bg-purple-500/10 text-purple-600`
-                      : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white'
-                  }`}>
-                    <Receipt size={20} strokeWidth={2.5} />
-                    {fullTxDetails && fullTxDetails.items.length > 0 && fullTxDetails.items.every((item) => (fullTxDetails.claims[item.id] || []).length > 0)
-                      ? 'Edit Selections'
-                      : 'Assign Items'}
-                  </button>
-
-                  {/* Itemized breakdown */}
-                  {fullTxDetails && fullTxDetails.items.length > 0 && (() => {
-                    const memberTotals = fullTxDetails.members.map((m) => {
-                      const items = fullTxDetails.items.filter((item) => (fullTxDetails.claims[item.id] || []).includes(m.id));
-                      const total = items.reduce((sum, item) => {
-                        const claimers = fullTxDetails.claims[item.id] || [];
-                        return sum + item.price / claimers.length;
-                      }, 0);
-                      return { ...m, items, total };
-                    });
-                    const itemSubtotal = fullTxDetails.items.reduce((s, i) => s + i.price, 0);
-                    const allClaimed = fullTxDetails.items.every((item) => (fullTxDetails.claims[item.id] || []).length > 0);
-                    const grandTotal = itemSubtotal + fullTipAmount;
-
-                    return (
-                      <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
-                        <div className="px-4 pt-4 pb-2">
-                          <h3 className={`text-sm font-semibold uppercase tracking-wide ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Item Breakdown</h3>
-                        </div>
-                        {memberTotals.map((m, i) => (
-                          <div key={m.id} className={`px-4 py-3 ${i > 0 ? `border-t ${isDark ? 'border-slate-700' : 'border-gray-100'}` : ''}`}>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <div className="flex items-center gap-2">
-                                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                                  {m.name.charAt(0).toUpperCase()}
-                                </div>
-                                <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                                  {m.id === user?.id ? 'You' : m.name}
-                                </p>
-                              </div>
-                              <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                                ${m.total.toFixed(2)}
-                              </p>
-                            </div>
-                            {m.items.length > 0 ? (
-                              <div className="ml-9 space-y-0.5">
-                                {m.items.map((item) => {
-                                  const claimers = fullTxDetails.claims[item.id] || [];
-                                  const share = item.price / claimers.length;
-                                  return (
-                                    <div key={item.id} className="flex items-center justify-between">
-                                      <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                        {item.name}{claimers.length > 1 ? ` (1/${claimers.length})` : ''}
-                                      </span>
-                                      <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                        ${share.toFixed(2)}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : (
-                              <p className="ml-9 text-xs text-slate-400 italic">No items selected</p>
+                  <div className="max-h-[300px] overflow-y-auto">
+                    {memberAvatars.map((member) => {
+                      const isMe = member._realId === user?.id;
+                      const isMemberCreator = member._realId === realCreatedBy;
+                      return (
+                        <div
+                          key={member.id}
+                          className={`flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-gray-50'} transition-colors border-b ${isDark ? 'border-slate-700/50' : 'border-gray-100'} last:border-0`}
+                        >
+                          <div
+                            className={`w-10 h-10 rounded-full bg-gradient-to-br ${member.color} flex items-center justify-center text-white text-xs font-bold shadow-md`}
+                          >
+                            {member.initials}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'} text-sm truncate`}>
+                              {member.name}
+                            </p>
+                            {isMe && (
+                              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>You</p>
+                            )}
+                            {isMemberCreator && (
+                              <p className="text-xs text-violet-500 font-medium">Group Creator</p>
                             )}
                           </div>
-                        ))}
-
-                        {/* Totals */}
-                        <div className={`px-4 py-3 border-t ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Subtotal</span>
-                            <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>${itemSubtotal.toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className={isDark ? 'text-slate-400' : 'text-slate-500'}>Tip</span>
-                            <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>${fullTipAmount.toFixed(2)}</span>
-                          </div>
-                          <div className={`flex justify-between text-sm pt-2 border-t ${isDark ? 'border-slate-700' : 'border-gray-100'}`}>
-                            <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Total</span>
-                            <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>${grandTotal.toFixed(2)}</span>
-                          </div>
+                          {isCreator && !isMe && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveMember(member);
+                                setShowMembersDropdown(false);
+                              }}
+                              className="text-red-500 text-xs font-semibold px-2 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </motion.div>
 
-                        {/* Tip slider - host only */}
-                        {isCreator && (
-                          <div className={`px-4 py-3 border-t ${isDark ? 'border-slate-700' : 'border-gray-200'}`}>
-                            <p className={`text-sm font-medium mb-2 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>Tip</p>
-                            <div className="flex items-center gap-4">
-                              <input
-                                type="range"
-                                min="0"
-                                max={Math.max(50, Math.ceil(itemSubtotal * 0.3))}
-                                step="0.5"
-                                value={fullTipAmount}
-                                onChange={(e) => setFullTipAmount(parseFloat(e.target.value) || 0)}
-                                className="flex-1"
-                              />
-                              <span className={`font-bold w-16 text-right ${isDark ? 'text-white' : 'text-slate-800'}`}>${fullTipAmount.toFixed(2)}</span>
-                            </div>
-                          </div>
-                        )}
-
-                        {!allClaimed && (
-                          <div className="px-4 pb-3">
-                            <p className="text-xs text-orange-500">All items must be assigned before confirming payment</p>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* Confirm & Pay button - host only */}
-                  {isCreator && fullTxDetails && fullTxDetails.items.length > 0 && fullTxDetails.items.every((item) => (fullTxDetails.claims[item.id] || []).length > 0) && (
-                    <button
-                      onClick={handleFullControlConfirm}
-                      disabled={submitting}
-                      className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-xl font-semibold disabled:opacity-60 flex items-center justify-center gap-2"
-                    >
-                      <DollarSign size={22} strokeWidth={2.5} />
-                      {submitting ? 'Processing...' : 'Confirm & Pay'}
-                    </button>
-                  )}
-
-                  {isCreator && (
-                    <button onClick={() => fileInputRef.current?.click()} disabled={creatingTx} className="w-full py-3 rounded-xl font-medium flex items-center justify-center gap-2 disabled:opacity-60 border-2 border-dashed border-purple-500 bg-purple-500/10 text-purple-600">
-                      <Upload size={20} strokeWidth={2.5} />
-                      {creatingTx ? 'Uploading...' : 'Replace receipt'}
-                    </button>
-                  )}
-                </>
+        {/* Split Evenly Mode */}
+        <AnimatePresence mode="wait">
+          {splitMode === 'even' && (
+            <motion.div
+              key="even"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              transition={{ duration: 0.15 }}
+            >
+              {!hasReceipt ? (
+                <motion.div
+                  initial={{ y: 8, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
+                >
+                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-purple-100'} flex items-center justify-center mx-auto mb-4`}>
+                    <Receipt size={28} className="text-purple-600" />
+                  </div>
+                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>
+                    Add a Receipt
+                  </h3>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                    Upload your receipt to split the bill evenly among all members
+                  </p>
+                  <button
+                    onClick={handleAddReceipt}
+                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                  >
+                    Add Receipt
+                  </button>
+                </motion.div>
               ) : (
                 <>
-                  <button onClick={() => fileInputRef.current?.click()} disabled={!isCreator || creatingTx} className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-4 rounded-xl font-semibold flex items-center justify-center gap-2 disabled:opacity-60">
-                    <Upload size={22} strokeWidth={2.5} />
-                    {creatingTx ? 'Uploading...' : 'Upload Receipt'}
+                  {/* Receipt Summary */}
+                  <motion.div
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
+                  >
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-12 h-12 rounded-[14px] bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg">
+                        <Receipt size={24} className="text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-lg`}>Receipt Added</p>
+                        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Bill will be split evenly</p>
+                      </div>
+                      <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                        <Check size={18} className="text-green-600" strokeWidth={3} />
+                      </div>
+                    </div>
+
+                    <div className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-50'} rounded-[16px] p-4 space-y-2`}>
+                      <div className="flex justify-between items-center">
+                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Subtotal</span>
+                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${receiptTotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Tip ({tipPercentage}%)</span>
+                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${tipAmount.toFixed(2)}</span>
+                      </div>
+                      <div className={`border-t ${isDark ? 'border-slate-600' : 'border-slate-200'} pt-2 mt-2`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Total</span>
+                          <span className={`font-bold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>${totalWithTip.toFixed(2)}</span>
+                        </div>
+                      </div>
+                      <div className={`${isDark ? 'bg-purple-900/30' : 'bg-purple-50'} rounded-xl p-3 mt-3`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`text-sm font-semibold ${isDark ? 'text-purple-300' : 'text-purple-900'}`}>Your Share</span>
+                          <span className={`font-bold text-xl ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>${yourShare.toFixed(2)}</span>
+                        </div>
+                        <p className={`text-xs ${isDark ? 'text-purple-400' : 'text-purple-600'} mt-1`}>
+                          Split among {memberAvatars.length} members
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+
+                  {/* Tip Slider */}
+                  <motion.div
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <DollarSign size={20} className="text-amber-500" />
+                        <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Add Tip</h3>
+                      </div>
+                      <span className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+                        {tipPercentage}%
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 mb-4">
+                      {[10, 15, 18, 20].map((tip) => (
+                        <button
+                          key={tip}
+                          onClick={() => setTipPercentage(tip)}
+                          className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
+                            tipPercentage === tip
+                              ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
+                              : `${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'}`
+                          }`}
+                        >
+                          {tip}%
+                        </button>
+                      ))}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="range" min="0" max="30" value={tipPercentage}
+                        onChange={(e) => setTipPercentage(parseInt(e.target.value))}
+                        className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                        style={{
+                          background: `linear-gradient(to right, rgb(139, 92, 246) 0%, rgb(168, 85, 247) ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} 100%)`
+                        }}
+                      />
+                      <div className="flex justify-between mt-2">
+                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>0%</span>
+                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>30%</span>
+                      </div>
+                    </div>
+                  </motion.div>
+
+                  {/* Complete Payment Button */}
+                  <motion.button
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    onClick={handleCompletePayment}
+                    disabled={settlingPayment}
+                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
+                  >
+                    {settlingPayment ? 'Processing...' : `Complete Payment • $${yourShare.toFixed(2)}`}
+                  </motion.button>
+                </>
+              )}
+            </motion.div>
+          )}
+
+          {/* Item Split Mode */}
+          {splitMode === 'item' && (
+            <motion.div
+              key="item"
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.15 }}
+            >
+              {!hasSelectedItems ? (
+                <motion.div
+                  initial={{ y: 8, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
+                >
+                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
+                    <Receipt size={28} className="text-indigo-600" />
+                  </div>
+                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Select Your Items</h3>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                    Upload receipt and choose what you ordered to split by item
+                  </p>
+                  <button
+                    onClick={handleAddReceipt}
+                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                  >
+                    Scan Receipt
                   </button>
-                  {!fullTx && (
-                    <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>Upload a receipt to start splitting items</p>
-                  )}
+                </motion.div>
+              ) : (
+                <>
+                  {/* Selected Items Summary */}
+                  <motion.div
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
+                  >
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-12 h-12 rounded-[14px] bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg">
+                        <Receipt size={24} className="text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-lg`}>Items Selected</p>
+                        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Your items from receipt</p>
+                      </div>
+                      <button
+                        onClick={() => onNavigate('receiptItems')}
+                        className="text-violet-600 font-semibold text-sm"
+                      >
+                        Edit
+                      </button>
+                    </div>
+
+                    <div className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-50'} rounded-[16px] p-4 space-y-2`}>
+                      <div className="flex justify-between items-center">
+                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Your Items</span>
+                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${yourItemsTotal.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Tip ({tipPercentage}%)</span>
+                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${tipAmount.toFixed(2)}</span>
+                      </div>
+                      <div className={`border-t ${isDark ? 'border-slate-600' : 'border-slate-200'} pt-2 mt-2`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Your Total</span>
+                          <span className={`font-bold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>${totalWithTip.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+
+                  {/* Tip Slider */}
+                  <motion.div
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <DollarSign size={20} className="text-amber-500" />
+                        <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Add Tip</h3>
+                      </div>
+                      <span className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+                        {tipPercentage}%
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 mb-4">
+                      {[10, 15, 18, 20].map((tip) => (
+                        <button
+                          key={tip}
+                          onClick={() => setTipPercentage(tip)}
+                          className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
+                            tipPercentage === tip
+                              ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
+                              : `${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'}`
+                          }`}
+                        >
+                          {tip}%
+                        </button>
+                      ))}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="range" min="0" max="30" value={tipPercentage}
+                        onChange={(e) => setTipPercentage(parseInt(e.target.value))}
+                        className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                        style={{
+                          background: `linear-gradient(to right, rgb(139, 92, 246) 0%, rgb(168, 85, 247) ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} 100%)`
+                        }}
+                      />
+                      <div className="flex justify-between mt-2">
+                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>0%</span>
+                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>30%</span>
+                      </div>
+                    </div>
+                  </motion.div>
+
+                  {/* Complete Payment Button */}
+                  <motion.button
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    onClick={handleCompletePayment}
+                    disabled={settlingPayment}
+                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
+                  >
+                    {settlingPayment ? 'Processing...' : `Complete Payment • $${totalWithTip.toFixed(2)}`}
+                  </motion.button>
                 </>
               )}
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Recent transactions */}
-        <div className="mt-6">
-          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-2`}>Recent transactions</h2>
-          {receipts.length === 0 ? (
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-6 text-center`}>
-              <Receipt size={28} className={`${isDark ? 'text-slate-500' : 'text-slate-300'} mx-auto mb-2`} />
-              <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'} text-sm`}>No receipts yet. Upload one to start splitting.</p>
-            </div>
-          ) : (
+        {/* Transaction History */}
+        {baseGroup.transactions.length > 0 && (
+          <motion.div
+            initial={{ y: 8, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.15 }}
+            className="mt-6"
+          >
+            <h2 className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-3 px-1`}>
+              Recent Activity
+            </h2>
             <div className="space-y-3">
-              {receipts.map((r) => (
-                <div key={r.id} className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm border ${isDark ? 'border-slate-700' : 'border-slate-100'}`}>
-                  <div className="flex items-center justify-between mb-2">
-                    <div>
-                      <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                        {new Date(r.created_at).toLocaleDateString()} {new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{r.status === 'completed' ? 'Completed' : 'Pending'}</p>
+              {baseGroup.transactions.map((transaction, index) => (
+                <motion.div
+                  key={transaction.id}
+                  initial={{ x: -6, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: index * 0.02, duration: 0.12 }}
+                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[18px] p-4 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-[12px] flex items-center justify-center ${
+                        transaction.type === 'expense' ? 'bg-red-100' : 'bg-green-100'
+                      }`}>
+                        <Receipt size={20} className={transaction.type === 'expense' ? 'text-red-500' : 'text-green-500'} />
+                      </div>
+                      <div>
+                        <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{transaction.description}</p>
+                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{transaction.date}</p>
+                      </div>
                     </div>
-                    <p className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>${r.total ? r.total.toFixed(2) : '—'}</p>
+                    <p className={`font-bold ${transaction.type === 'expense' ? 'text-red-500' : 'text-green-500'}`}>
+                      {transaction.type === 'expense' ? '-' : '+'}${transaction.amount.toFixed(2)}
+                    </p>
                   </div>
-                  {r.splits.length > 0 && (
-                    <div className="space-y-1 mt-2">
-                      {r.splits.map((split) => (
-                        <div key={split.user_id} className="flex items-center justify-between text-sm">
-                          <span className={isDark ? 'text-slate-300' : 'text-slate-600'}>{split.name}</span>
-                          <span className="font-medium">${split.amount.toFixed(2)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <button onClick={() => onNavigate({ page: 'receiptItems', receiptId: r.id, groupId })} className="mt-3 text-sm text-blue-500 font-medium">View / Edit split</button>
-                </div>
+                </motion.div>
               ))}
             </div>
-          )}
-        </div>
+          </motion.div>
+        )}
       </div>
 
-      {/* Confirm delete/leave/remove dialog */}
-      {confirmAction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => !actionLoading && setConfirmAction(null)}>
-          <div className="absolute inset-0 bg-black/40" />
-          <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 400 }}
-            className={`relative z-50 w-[calc(100%-2rem)] max-w-[340px] rounded-2xl p-6 shadow-xl ${isDark ? 'bg-slate-800' : 'bg-white'}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex flex-col items-center text-center">
-              <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-4 ${
-                confirmAction === 'delete' ? 'bg-red-100' : confirmAction === 'remove' ? 'bg-red-100' : 'bg-amber-100'
-              }`}>
-                {confirmAction === 'delete' ? (
-                  <Trash2 size={24} className="text-red-500" />
-                ) : confirmAction === 'remove' ? (
-                  <UserMinus size={24} className="text-red-500" />
-                ) : (
-                  <LogOut size={24} className="text-amber-500" />
-                )}
+      {/* Bottom Navigation */}
+      <BottomNavigation currentPage="groupDetail" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
+
+      {/* Profile Sheet */}
+      {showProfileSheet && (
+        <ProfileSheet 
+          onClose={() => setShowProfileSheet(false)} 
+          onNavigateToAccount={() => onNavigate('account')}
+          onNavigateToSettings={() => onNavigate('settings')}
+          onNavigateToWallet={() => onNavigate('wallet')}
+          theme={theme}
+        />
+      )}
+
+      {/* Invite Sheet */}
+      <AnimatePresence>
+        {showInviteSheet && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowInviteSheet(false)} 
+            />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25 }}
+              className={`fixed bottom-0 left-0 right-0 z-50 ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-t-3xl p-6 max-w-[430px] mx-auto`}
+            >
+              <div className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto mb-6" />
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-12 h-12 rounded-[14px] bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center shadow-lg">
+                  <Link2 size={24} className="text-white" />
+                </div>
+                <div>
+                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Invite Members</h3>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Share this link to join {baseGroup.name}</p>
+                </div>
               </div>
-              <h3 className={`text-lg font-bold mb-2 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                {confirmAction === 'delete' ? 'Delete Group?' : confirmAction === 'remove' ? `Remove ${memberToRemove?.name}?` : 'Leave Group?'}
-              </h3>
-              <p className={`text-sm mb-6 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                {confirmAction === 'delete'
-                  ? 'This will permanently delete the group, all receipts, and transaction history. This cannot be undone.'
-                  : confirmAction === 'remove'
-                  ? `${memberToRemove?.name} will be removed from the group. They can rejoin via the invite link.`
-                  : 'You will be removed from this group and lose access to its receipts and history.'
-                }
-              </p>
-              <div className="flex gap-3 w-full">
-                <button
-                  type="button"
-                  onClick={() => { setConfirmAction(null); setMemberToRemove(null); }}
-                  disabled={actionLoading}
-                  className={`flex-1 py-2.5 rounded-xl font-medium text-sm ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700'}`}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmAction === 'delete' ? handleDeleteGroup : confirmAction === 'remove' ? handleRemoveMember : handleLeaveGroup}
-                  disabled={actionLoading}
-                  className="flex-1 py-2.5 rounded-xl font-medium text-sm bg-red-500 text-white disabled:opacity-60"
-                >
-                  {actionLoading ? 'Processing...' : confirmAction === 'delete' ? 'Delete' : confirmAction === 'remove' ? 'Remove' : 'Leave'}
-                </button>
+
+              {inviteLink ? (
+                <>
+                  <div className={`${isDark ? 'bg-slate-700' : 'bg-slate-100'} rounded-xl p-4 mb-4`}>
+                    <p className={`text-sm font-mono break-all ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                      {inviteLink}
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleCopyInviteLink}
+                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-2xl font-bold shadow-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2 mb-3"
+                  >
+                    {linkCopied ? <Check size={20} /> : <Copy size={20} />}
+                    {linkCopied ? 'Copied!' : 'Copy Link'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (navigator.share) {
+                        navigator.share({ title: `Join ${baseGroup.name} on Tabby`, url: inviteLink });
+                      } else {
+                        handleCopyInviteLink();
+                      }
+                    }}
+                    className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700'} py-4 rounded-2xl font-semibold active:scale-[0.98] transition-transform`}
+                  >
+                    Share Link
+                  </button>
+                </>
+              ) : (
+                <p className={`text-center py-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  Loading invite link...
+                </p>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Group Modal */}
+      {showDeleteModal && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowDeleteModal(false)} />
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm">
+            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={24} className="text-red-500" />
+              </div>
+              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>Delete {baseGroup.name}?</h3>
+              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>This action cannot be undone.</p>
+              <div className="space-y-2">
+                <button onClick={handleDeleteGroup} className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform">Yes, Delete Group</button>
+                <button onClick={() => setShowDeleteModal(false)} className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
               </div>
             </div>
           </motion.div>
-        </div>
+        </>
+      )}
+
+      {/* Leave Group Modal */}
+      {showLeaveModal && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowLeaveModal(false)} />
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm">
+            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+              <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center mx-auto mb-4">
+                <LogOut size={24} className="text-orange-500" />
+              </div>
+              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>Leave {baseGroup.name}?</h3>
+              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>You'll lose access to this group.</p>
+              <div className="space-y-2">
+                <button onClick={handleLeaveGroup} className="w-full bg-orange-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform">Yes, Leave Group</button>
+                <button onClick={() => setShowLeaveModal(false)} className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
+              </div>
+            </div>
+          </motion.div>
+        </>
+      )}
+
+      {/* Remove Member Modal */}
+      {showRemoveMemberModal && selectedMember && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowRemoveMemberModal(false)} />
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm">
+            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+                <UserMinus size={24} className="text-red-500" />
+              </div>
+              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>Remove {selectedMember.name}?</h3>
+              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>They'll be removed from the group.</p>
+              <div className="space-y-2">
+                <button onClick={confirmRemoveMember} className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform">Yes, Remove Member</button>
+                <button onClick={() => setShowRemoveMemberModal(false)} className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
+              </div>
+            </div>
+          </motion.div>
+        </>
       )}
     </div>
   );

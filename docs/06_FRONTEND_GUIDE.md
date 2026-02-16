@@ -10,9 +10,8 @@ The Tabby frontend is a React 18 single-page application built with Vite and Typ
 src/
 ├── main.tsx                    # Entry point — renders AuthProvider → App
 ├── App.tsx                     # Page router, theme, auth flow, navigation
-├── index.css                   # Tailwind CSS v4 compiled styles
 ├── styles/
-│   └── globals.css             # CSS custom properties
+│   └── globals.css             # Tailwind CSS v4 compiled styles
 ├── contexts/
 │   └── AuthContext.tsx          # Global auth state (user, login, logout)
 ├── lib/
@@ -30,15 +29,13 @@ src/
 | `SplashScreen` | (initial) | App launch animation | No |
 | `LandingPage` | `home` | Main home screen | **Yes** |
 | `LoginSignup` | (auth) | Login / signup forms | No |
-| `LinkBankPage` | `link_bank` | Bank linking stub | No |
+| `AcceptInvitePage` | `acceptInvite` | Accept group invite | No |
 | `GroupsPage` | `groups` | Groups list with search | **Yes** |
 | `GroupDetailPage` | `groupDetail` | Core group session page | No |
 | `CreateGroupPage` | `createGroup` | New group form | No |
-| `CreateExpensePage` | `create` | Quick actions menu | No |
 | `ReceiptScanPage` | `receiptScan` | Receipt upload camera | No |
 | `ReceiptItemsPage` | `receiptItems` | Item claiming interface | No |
 | `ProcessingPaymentPage` | `processing` | Settlement animation | No |
-| `TransactionAllocationPage` | `transactionAllocation` | Even split confirm | No |
 | `ActivityPage` | `activity` | Transaction history | **Yes** |
 | `AccountPage` | `account` | Profile editing | No |
 | `VirtualWalletPage` | `wallet` | Virtual cards list | No |
@@ -342,13 +339,11 @@ return fetch(`${API_BASE}/transactions/${id}/receipt`, {
 
 ## Invite Link Handling
 
-When the app loads, it checks for `?invite=TOKEN` in the URL:
+Invite links use the format `${origin}/join/${inviteToken}`. When a user opens such a link:
 
-1. `App.tsx` reads `window.location.search` for the invite token
-2. If user is not authenticated, token is saved to `sessionStorage`
-3. After login + bank linking, the token is retrieved
-4. `api.groups.joinByToken(token)` is called
-5. User is navigated to the joined group
+1. The app routes to `AcceptInvitePage` with the token from the URL path
+2. `AcceptInvitePage` calls `api.groups.joinByToken(token)` when the user accepts
+3. On success, the user is navigated to the joined group
 
 ## Adding a New Page
 

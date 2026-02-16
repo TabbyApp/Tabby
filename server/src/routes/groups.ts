@@ -41,6 +41,116 @@ groupsRouter.get('/', requireAuth, (req, res) => {
   })));
 });
 
+// IMPORTANT: specific routes must come before /:groupId
+// Get virtual cards for user's groups with total spent (completed receipts)
+groupsRouter.get('/virtual-cards/list', requireAuth, (req, res) => {
+  const { userId } = (req as any).user;
+
+  const cards = db.prepare(`
+    SELECT g.id as groupId, g.name as groupName, vc.card_number_last_four as cardLastFour,
+           COALESCE(
+             (SELECT SUM(COALESCE(r.total, (SELECT SUM(price) FROM receipt_items WHERE receipt_id = r.id)))
+              FROM receipts r WHERE r.group_id = g.id AND r.status = 'completed'),
+             0
+           ) as groupTotal
+    FROM groups g
+    JOIN group_members gm ON g.id = gm.group_id
+    LEFT JOIN virtual_cards vc ON g.id = vc.group_id
+    WHERE gm.user_id = ?
+    ORDER BY g.created_at DESC
+  `).all(userId) as { groupId: string; groupName: string; cardLastFour: string | null; groupTotal: number }[];
+
+  res.json(cards.map((c) => ({ ...c, active: true, groupTotal: c.groupTotal ?? 0 })));
+});
+
+// Yield to event loop so /users/me and other requests can run (avoids blocking 7s+)
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((r) => setImmediate(r));
+}
+
+// Batch fetch group details (reduces N requests to 1 - avoids connection queueing)
+groupsRouter.get('/batch', requireAuth, async (req, res) => {
+  const { userId } = (req as any).user;
+  const idsParam = req.query.ids as string | undefined;
+  if (!idsParam) return res.status(400).json({ error: 'ids query param required' });
+  const ids = idsParam.split(',').map((s) => s.trim()).filter(Boolean);
+  if (ids.length === 0 || ids.length > 20) return res.status(400).json({ error: 'ids must have 1-20 group ids' });
+
+  type BatchGroup = {
+    id: string; name: string; created_by: string;
+    members: { id: string; name: string; email: string }[];
+    cardLastFour: string | null; inviteToken: string;
+    receipts: { id: string; group_id: string; status: string; total: number | null; created_at: string; splits?: unknown[] }[];
+  };
+  const out: Record<string, BatchGroup> = {};
+
+  const groupStmt = db.prepare(`
+    SELECT g.id, g.name, g.created_by, g.invite_token, vc.card_number_last_four
+    FROM groups g
+    LEFT JOIN virtual_cards vc ON g.id = vc.group_id
+    WHERE g.id = ?
+  `);
+  const memberStmt = db.prepare(`
+    SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?
+  `);
+  const membersStmt = db.prepare(`
+    SELECT u.id, u.name, u.email
+    FROM group_members gm
+    JOIN users u ON gm.user_id = u.id
+    WHERE gm.group_id = ?
+  `);
+
+  for (const groupId of ids) {
+    await yieldToEventLoop(); // Let /users/me and other quick requests run
+
+    const isMember = memberStmt.get(groupId, userId);
+    if (!isMember) continue;
+
+    let group = groupStmt.get(groupId) as { id: string; name: string; created_by: string; invite_token: string | null; card_number_last_four: string | null } | undefined;
+    if (!group) continue;
+
+    let inviteToken = group.invite_token;
+    if (!inviteToken) {
+      inviteToken = crypto.randomBytes(12).toString('hex');
+      db.prepare('UPDATE groups SET invite_token = ? WHERE id = ?').run(inviteToken, groupId);
+    }
+
+    const members = membersStmt.all(groupId) as { id: string; name: string; email: string }[];
+    const receipts = db.prepare(
+      'SELECT id, group_id, status, total, created_at, transaction_id FROM receipts WHERE group_id = ? ORDER BY created_at DESC'
+    ).all(groupId) as { id: string; group_id: string; status: string; total: number | null; created_at: string; transaction_id: string | null }[];
+    const receiptsWithSplits = receipts.map((r) => {
+      try {
+        let splits: { user_id: string; amount: number; status: string; name: string }[];
+        if (r.transaction_id) {
+          splits = db.prepare(
+            `SELECT ta.user_id, ta.amount, 'completed' as status, u.name FROM transaction_allocations ta JOIN users u ON ta.user_id = u.id WHERE ta.transaction_id = ?`
+          ).all(r.transaction_id) as { user_id: string; amount: number; status: string; name: string }[];
+        } else {
+          splits = db.prepare(
+            `SELECT rs.user_id, rs.amount, rs.status, u.name FROM receipt_splits rs JOIN users u ON rs.user_id = u.id WHERE rs.receipt_id = ?`
+          ).all(r.id) as { user_id: string; amount: number; status: string; name: string }[];
+        }
+        return { ...r, splits };
+      } catch {
+        return { ...r, splits: [] };
+      }
+    });
+
+    out[groupId] = {
+      id: group.id,
+      name: group.name,
+      created_by: group.created_by,
+      members,
+      cardLastFour: group.card_number_last_four,
+      inviteToken,
+      receipts: receiptsWithSplits,
+    };
+  }
+
+  res.json(out);
+});
+
 // Create group and unique virtual card
 groupsRouter.post('/', requireAuth, requireBankLinked, (req, res) => {
   const { userId } = (req as any).user;
@@ -87,45 +197,37 @@ groupsRouter.post('/', requireAuth, requireBankLinked, (req, res) => {
   });
 });
 
-// Get single group with members
+// Get single group with members (optimized: combined auth+group query)
 groupsRouter.get('/:groupId', requireAuth, (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
 
-  const memberCheck = db.prepare(
-    'SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?'
-  ).get(groupId, userId);
-
-  if (!memberCheck) {
-    return res.status(404).json({ error: 'Group not found' });
-  }
-
-  const group = db.prepare(`
-    SELECT g.id, g.name, g.created_by, g.created_at,
-           vc.card_number_last_four, g.invite_token
+  const row = db.prepare(`
+    SELECT g.id, g.name, g.created_by, g.created_at, g.invite_token,
+           vc.card_number_last_four,
+           (SELECT 1 FROM group_members WHERE group_id = g.id AND user_id = ? LIMIT 1) as is_member
     FROM groups g
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
     WHERE g.id = ?
-  `).get(groupId) as { id: string; name: string; created_by: string; created_at: string; card_number_last_four: string | null; invite_token: string | null } | undefined;
+  `).get(userId, groupId) as { id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number } | undefined;
 
-  if (!group) {
-    return res.status(404).json({ error: 'Group not found' });
-  }
+  if (!row || !row.is_member) return res.status(404).json({ error: 'Group not found' });
 
-  let inviteToken = group.invite_token;
+  let inviteToken = row.invite_token;
   if (!inviteToken) {
     inviteToken = crypto.randomBytes(12).toString('hex');
     db.prepare('UPDATE groups SET invite_token = ? WHERE id = ?').run(inviteToken, groupId);
   }
 
   const members = db.prepare(`
-    SELECT u.id, u.name, u.email
-    FROM group_members gm
-    JOIN users u ON gm.user_id = u.id
-    WHERE gm.group_id = ?
+    SELECT u.id, u.name, u.email FROM group_members gm
+    JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ?
   `).all(groupId) as { id: string; name: string; email: string }[];
 
-  res.json({ ...group, members, cardLastFour: group.card_number_last_four, inviteToken });
+  res.json({
+    id: row.id, name: row.name, created_by: row.created_by, created_at: row.created_at,
+    members, cardLastFour: row.card_number_last_four, inviteToken,
+  });
 });
 
 // Join group via invite token (user becomes member immediately)
@@ -204,28 +306,6 @@ groupsRouter.delete('/:groupId/members/:memberId', requireAuth, (req, res) => {
 
   db.prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?').run(groupId, memberId);
   res.json({ ok: true });
-});
-
-// Get virtual cards for user's groups with total spent (completed receipts)
-groupsRouter.get('/virtual-cards/list', requireAuth, (req, res) => {
-  const { userId } = (req as any).user;
-
-  const cards = db.prepare(`
-    SELECT g.id as groupId, g.name as groupName, vc.card_number_last_four as cardLastFour,
-           COALESCE(
-             (SELECT SUM(
-               COALESCE(r.total, (SELECT SUM(price) FROM receipt_items WHERE receipt_id = r.id))
-             ) FROM receipts r WHERE r.group_id = g.id AND r.status = 'completed'),
-             0
-           ) as groupTotal
-    FROM groups g
-    JOIN group_members gm ON g.id = gm.group_id
-    LEFT JOIN virtual_cards vc ON g.id = vc.group_id
-    WHERE gm.user_id = ?
-    ORDER BY g.created_at DESC
-  `).all(userId) as { groupId: string; groupName: string; cardLastFour: string | null; groupTotal: number }[];
-
-  res.json(cards.map((c) => ({ ...c, active: true, groupTotal: c.groupTotal ?? 0 })));
 });
 
 // Create transaction (on receipt upload or manual total entry)

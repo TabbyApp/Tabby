@@ -9,22 +9,35 @@ function genId() {
   return crypto.randomUUID();
 }
 
-// Get current user profile
+// Get current user profile (single query via JSON aggregation - avoids 2 round-trips)
 usersRouter.get('/me', requireAuth, (req, res) => {
   const { userId } = (req as any).user;
-  const user = db.prepare(
-    'SELECT id, email, name, COALESCE(phone, \'\') as phone, created_at, COALESCE(bank_linked, 0) as bank_linked FROM users WHERE id = ?'
-  ).get(userId) as { id: string; email: string; name: string; phone: string; created_at: string; bank_linked: number } | undefined;
+  const row = db.prepare(`
+    SELECT u.id, u.email, u.name, COALESCE(u.phone, '') as phone, u.created_at, COALESCE(u.bank_linked, 0) as bank_linked,
+           (SELECT json_group_array(json_object('id', id, 'type', type, 'last_four', last_four, 'brand', brand, 'created_at', created_at))
+            FROM payment_methods WHERE user_id = u.id) as payment_methods_json
+    FROM users u WHERE u.id = ?
+  `).get(userId) as { id: string; email: string; name: string; phone: string; created_at: string; bank_linked: number; payment_methods_json: string } | undefined;
 
-  if (!user) {
-    return res.status(404).json({ error: 'User not found' });
+  if (!row) return res.status(404).json({ error: 'User not found' });
+
+  let paymentMethods: { id: string; type: string; last_four: string; brand: string | null; created_at: string }[] = [];
+  if (row.payment_methods_json) {
+    try {
+      const parsed = JSON.parse(row.payment_methods_json);
+      paymentMethods = Array.isArray(parsed) ? parsed : (parsed != null ? [parsed] : []);
+    } catch { /* fallback empty */ }
   }
 
-  const paymentMethods = db.prepare(
-    'SELECT id, type, last_four, brand, created_at FROM payment_methods WHERE user_id = ?'
-  ).all(userId) as { id: string; type: string; last_four: string; brand: string | null; created_at: string }[];
-
-  res.json({ ...user, bank_linked: !!user.bank_linked, paymentMethods });
+  res.json({
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    phone: row.phone,
+    created_at: row.created_at,
+    bank_linked: !!row.bank_linked,
+    paymentMethods: paymentMethods.filter((p) => p != null),
+  });
 });
 
 // Update profile (name, email, phone)

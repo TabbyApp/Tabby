@@ -10,7 +10,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
   useEffect(() => {
     const timer = setTimeout(() => {
       onComplete();
-    }, 3000);
+    }, 2000);
     return () => clearTimeout(timer);
   }, [onComplete]);
 
@@ -22,8 +22,8 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
           initial={{ y: 0, scale: 1 }}
           animate={{ y: -180, scale: 0.85 }}
           transition={{ 
-            delay: 0.8,
-            duration: 0.6,
+            delay: 0.3,
+            duration: 0.5,
             ease: [0.4, 0, 0.2, 1]
           }}
           className="flex justify-center"
@@ -38,8 +38,8 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ 
-              delay: 1.5,
-              duration: 0.5,
+              delay: 0.8,
+              duration: 0.4,
               ease: [0.4, 0, 0.2, 1]
             }}
             className="text-5xl font-bold text-center text-slate-800 mb-2"
@@ -52,8 +52,8 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ 
-              delay: 1.8,
-              duration: 0.5,
+              delay: 1.0,
+              duration: 0.4,
               ease: [0.4, 0, 0.2, 1]
             }}
             className="text-lg text-center text-slate-600"

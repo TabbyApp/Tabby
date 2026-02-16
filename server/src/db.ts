@@ -10,7 +10,15 @@ if (!fs.existsSync(dataDir)) {
 }
 const dbPath = path.join(dataDir, 'tabby.db');
 
-export const db = new Database(dbPath);
+export const db = new Database(dbPath, { readonly: false });
+
+// SQLite performance: WAL mode + tuned PRAGMAs for fast reads
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('cache_size = -64000');  // 64MB cache
+db.pragma('temp_store = MEMORY');
+db.pragma('mmap_size = 268435456');  // 256MB mmap
+db.pragma('busy_timeout = 5000');
 
 // Init schema
 db.exec(`

@@ -68,7 +68,7 @@ This prevents expensive remounts when switching between main tabs.
 
 All other pages mount/unmount when navigated to/from:
 
-- `GroupDetailPage`, `CreateGroupPage`, `CreateExpensePage`
+- `GroupDetailPage`, `CreateGroupPage`
 - `ReceiptScanPage`, `ReceiptItemsPage`, `ProcessingPaymentPage`
 - `AccountPage`, `SettingsPage`, `VirtualWalletPage`, etc.
 
@@ -85,7 +85,7 @@ App Mount
     │
     ├── After login/signup:
     │   ├── bank_linked? → Show Home
-    │   └── !bank_linked → Show LinkBankPage
+    │   └── !bank_linked → Users can link their bank from the Account page
     │
     └── After bank linked → Check for invite token → Join group or go Home
 ```

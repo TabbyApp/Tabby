@@ -22,13 +22,13 @@ There are **no persistent wallets, no running balances, and no reimbursement flo
 
 ## Current State
 
-Tabby is an **MVP (Minimum Viable Product)** with simulated settlement. Real payment processing (Stripe, Plaid) is not yet integrated. The app demonstrates the full user flow with:
+Tabby is an **MVP (Minimum Viable Product)** with real settlement via the transaction API. Real payment processing (Stripe, Plaid) is not yet integrated. The app demonstrates the full user flow with:
 
 - Simulated bank linking
-- Virtual card generation (mock)
+- Virtual cards created per-group in the database
 - OCR-powered receipt scanning (via TabScanner API)
 - Real-time item splitting
-- Simulated payment settlement
+- Real payment settlement via transaction API
 
 ## Tech Stack
 
@@ -74,9 +74,8 @@ Tabby/
 ├── src/                           # Frontend React app
 │   ├── main.tsx                   # App entry point
 │   ├── App.tsx                    # Router and page manager
-│   ├── index.css                  # Tailwind CSS styles
 │   ├── styles/
-│   │   └── globals.css            # CSS custom properties
+│   │   └── globals.css            # Tailwind CSS styles & custom properties
 │   ├── contexts/
 │   │   └── AuthContext.tsx         # Authentication state provider
 │   ├── lib/
@@ -85,11 +84,9 @@ Tabby/
 │       ├── SplashScreen.tsx        # App launch animation
 │       ├── LandingPage.tsx         # Home screen
 │       ├── LoginSignup.tsx         # Auth forms
-│       ├── LinkBankPage.tsx        # Bank linking (stub)
 │       ├── GroupsPage.tsx          # Groups list
 │       ├── GroupDetailPage.tsx     # Group session (core page)
 │       ├── CreateGroupPage.tsx     # Create new group
-│       ├── CreateExpensePage.tsx   # Quick actions menu
 │       ├── ReceiptScanPage.tsx     # Receipt upload
 │       ├── ReceiptItemsPage.tsx    # Item claiming interface
 │       ├── ProcessingPaymentPage.tsx # Payment animation
@@ -98,13 +95,14 @@ Tabby/
 │       ├── VirtualWalletPage.tsx   # Virtual cards list
 │       ├── CardDetailsPage.tsx     # Card details (placeholder)
 │       ├── SettingsPage.tsx        # App settings
-│       ├── TransactionAllocationPage.tsx # Even split allocation
 │       ├── ProfileSheet.tsx        # Bottom sheet menu
 │       ├── TabbyCatLogo.tsx        # App logo SVG
 │       ├── ErrorBoundary.tsx       # React error boundary
 │       ├── figma/                  # Figma import helpers
 │       └── ui/                    # shadcn/ui base components
 ├── package.json                   # Frontend dependencies
+├── tsconfig.json                  # TypeScript configuration
+├── postcss.config.mjs             # PostCSS configuration
 └── vite.config.ts                 # Vite configuration
 ```
 

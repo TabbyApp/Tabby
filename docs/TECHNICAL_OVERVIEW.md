@@ -308,7 +308,7 @@ On mount, `AuthContext`:
 | Upload receipt    | ReceiptScanPage        | POST /receipts/upload (multipart)                                         |
 | Split items       | ReceiptItemsPage       | GET /receipts/:id, PUT claims, POST complete                              |
 | Activity          | ActivityPage           | GET /receipts/splits/me                                                   |
-| Processing        | ProcessingPaymentPage  | Client-only; receives splits from navigation state                        |
+| Processing        | ProcessingPaymentPage  | Calls api.transactions.settle(); receives splits from navigation state    |
 
 ---
 
@@ -316,7 +316,7 @@ On mount, `AuthContext`:
 
 - **Receipt images**: Stored in `server/uploads/`, served at `/uploads` via `express.static`.
 - **Vite proxy**: `/uploads` is proxied to the backend, so the frontend requests `/uploads/xxx.jpg` and gets it from the server.
-- **Build output**: Frontend builds to `dist/` (Vite `build`); `index.html` references bundled JS/CSS.
+- **Build output**: Frontend builds to `build/` (Vite `build`); `index.html` references bundled JS/CSS.
 
 ---
 
@@ -363,6 +363,7 @@ On mount, `AuthContext`:
 | `server/src/routes/auth.ts`     | Signup, login, refresh, logout             |
 | `server/src/routes/users.ts`    | GET /me, POST payment-methods              |
 | `server/src/routes/groups.ts`   | Groups CRUD, virtual cards                 |
+| `server/src/routes/transactions.ts` | List, get, upload receipt, tip, claims, finalize, settle |
 | `server/src/routes/receipts.ts` | Upload, list, get, items, claims, complete |
 | `server/src/ocr.ts`     | TabScanner API integration                          |
 | `src/contexts/AuthContext.tsx`  | Auth state, login/signup/logout            |

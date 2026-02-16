@@ -5,9 +5,10 @@ import { useAuth } from '../contexts/AuthContext';
 
 interface LoginSignupProps {
   onAuthenticate: () => void;
+  onForgotPassword: () => void;
 }
 
-export function LoginSignup({ onAuthenticate }: LoginSignupProps) {
+export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupProps) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -46,25 +47,25 @@ export function LoginSignup({ onAuthenticate }: LoginSignupProps) {
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.2, duration: 0.5 }}
+          transition={{ duration: 0.15 }}
           className="flex justify-center mb-4"
         >
           <TabbyCatLogo />
         </motion.div>
         
         <motion.h1
-          initial={{ y: 20, opacity: 0 }}
+          initial={{ y: 6, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.3, duration: 0.5 }}
+          transition={{ duration: 0.15, delay: 0.03 }}
           className="text-4xl font-bold text-slate-800 mb-2"
         >
           Tabby
         </motion.h1>
         
         <motion.p
-          initial={{ y: 20, opacity: 0 }}
+          initial={{ y: 6, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.4, duration: 0.5 }}
+          transition={{ duration: 0.15, delay: 0.06 }}
           className="text-[17px] text-slate-600"
         >
           Awkwardness Ends Here
@@ -73,12 +74,18 @@ export function LoginSignup({ onAuthenticate }: LoginSignupProps) {
 
       {/* Form */}
       <motion.form 
-        initial={{ y: 30, opacity: 0 }}
+        initial={{ y: 6, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.5, duration: 0.5 }}
+        transition={{ duration: 0.15, delay: 0.09 }}
         onSubmit={handleSubmit} 
         className="flex-1 flex flex-col"
       >
+        {error && (
+          <div className="bg-red-100 text-red-600 text-sm px-4 py-3 rounded-xl mb-3">
+            {error}
+          </div>
+        )}
+
         <div className="space-y-3 mb-4">
           {!isLogin && (
             <div className="bg-white rounded-xl overflow-hidden shadow-sm">
@@ -120,6 +127,7 @@ export function LoginSignup({ onAuthenticate }: LoginSignupProps) {
           <div className="mb-6 text-right">
             <button 
               type="button"
+              onClick={onForgotPassword}
               className="text-[15px] text-blue-500 font-medium"
             >
               Forgot password?
@@ -127,23 +135,18 @@ export function LoginSignup({ onAuthenticate }: LoginSignupProps) {
           </div>
         )}
 
-        {error && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-            <p className="text-red-600 text-sm">{error}</p>
-          </div>
-        )}
         <div className="mt-auto space-y-3">
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-gradient-to-r from-slate-600 to-blue-500 text-white py-3.5 rounded-xl text-[17px] font-semibold shadow-lg active:scale-[0.98] transition-transform disabled:opacity-70"
+            className="w-full bg-gradient-to-r from-slate-600 to-blue-500 text-white py-3.5 rounded-xl text-[17px] font-semibold shadow-lg active:scale-[0.98] transition-transform disabled:opacity-60"
           >
             {loading ? 'Please wait...' : isLogin ? 'Log In' : 'Sign Up'}
           </button>
 
           <button
             type="button"
-            onClick={() => setIsLogin(!isLogin)}
+            onClick={() => { setIsLogin(!isLogin); setError(''); }}
             className="w-full text-[15px] text-slate-600 font-medium py-2"
           >
             {isLogin ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
