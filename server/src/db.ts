@@ -43,8 +43,17 @@ db.exec(`
     type TEXT NOT NULL CHECK (type IN ('bank', 'card')),
     last_four TEXT NOT NULL,
     brand TEXT,
-    -- Encrypted in production; mock plaintext for prototype
     masked_data TEXT,
+    plaid_account_id TEXT,
+    plaid_item_id TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS plaid_items (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    item_id TEXT UNIQUE NOT NULL,
+    access_token TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -60,6 +69,16 @@ db.exec(`
     user_id TEXT NOT NULL REFERENCES users(id),
     joined_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (group_id, user_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS group_invites (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    inviter_id TEXT NOT NULL REFERENCES users(id),
+    invitee_email TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted')),
+    created_at TEXT DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS virtual_cards (
@@ -109,10 +128,36 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
   CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+  CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash ON refresh_tokens(token_hash);
   CREATE INDEX IF NOT EXISTS idx_payment_methods_user ON payment_methods(user_id);
   CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
   CREATE INDEX IF NOT EXISTS idx_receipts_group ON receipts(group_id);
+
+  CREATE INDEX IF NOT EXISTS idx_group_invites_token ON group_invites(token);
+  CREATE INDEX IF NOT EXISTS idx_group_invites_invitee_email ON group_invites(invitee_email);
+  CREATE INDEX IF NOT EXISTS idx_group_invites_group_id ON group_invites(group_id);
+  CREATE INDEX IF NOT EXISTS idx_plaid_items_user ON plaid_items(user_id);
+
+  CREATE TABLE IF NOT EXISTS phone_otps (
+    phone TEXT NOT NULL PRIMARY KEY,
+    code TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS phone_invites (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES groups(id),
+    inviter_id TEXT NOT NULL REFERENCES users(id),
+    invitee_phone TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted')),
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_phone_invites_phone ON phone_invites(invitee_phone);
+  CREATE INDEX IF NOT EXISTS idx_phone_invites_group ON phone_invites(group_id);
+  CREATE INDEX IF NOT EXISTS idx_phone_invites_token ON phone_invites(token);
 `);
 
 // MVP: bank_linked, transactions, transaction_allocations

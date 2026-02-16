@@ -52,7 +52,7 @@ async function main() {
   let worker;
   try {
     worker = await createWorker('eng', 1, { logger: () => {} });
-    await worker.setParameters({ tessedit_pageseg_mode: '6' }); // uniform block - better for receipts
+    await worker.setParameters({ tessedit_pageseg_mode: 6 } as Record<string, unknown>); // uniform block - better for receipts
     const { data } = await worker.recognize(imagePath);
     const items = parseLineItems(data?.text ?? '');
     process.stdout.write(JSON.stringify(items));

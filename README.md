@@ -1,18 +1,11 @@
-# Tabby
 
-Group payments made invisible — one card, everyone pays their share instantly.
+  # iOS App Login Page
 
-## Run locally
+  This is a code bundle for iOS App Login Page. The original project is available at https://www.figma.com/design/w8WHY4DFy9SPTnM8BjMyZu/iOS-App-Login-Page.
 
-**Terminal 1 – backend**
-```bash
-cd server && npm install && npm run dev
-```
+  ## Running the code
 
-**Terminal 2 – frontend**
-```bash
-npm install && npm run dev
-```
+  Run `npm i` to install the dependencies.
 
 Frontend: http://localhost:3000  
 API: http://localhost:3001

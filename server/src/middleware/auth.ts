@@ -11,11 +11,13 @@ export interface JwtPayload {
   type: 'access' | 'refresh';
 }
 
+const ACCESS_TOKEN_TTL = process.env.NODE_ENV === 'production' ? '15m' : '7d';
+
 export function signAccessToken(payload: Omit<JwtPayload, 'type'>): string {
   return jwt.sign(
     { ...payload, type: 'access' },
     ACCESS_SECRET,
-    { expiresIn: '15m' }
+    { expiresIn: ACCESS_TOKEN_TTL }
   );
 }
 
