@@ -46,7 +46,7 @@ groupsRouter.get('/', requireAuth, async (req, res) => {
 groupsRouter.get('/virtual-cards/list', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
 
-  const { rows: cards } = await query<{ groupId: string; groupName: string; cardLastFour: string | null; groupTotal: string }>(`
+  const { rows: cards } = await query<{ groupId: string; groupName: string; cardLastFour: string | null; groupTotal: number }>(`
     WITH receipt_totals AS (
       SELECT r.group_id,
         COALESCE(r.total, (SELECT COALESCE(SUM(price), 0) FROM receipt_items WHERE receipt_id = r.id)) AS total
