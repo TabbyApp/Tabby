@@ -20,5 +20,5 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/migrations ./migrations
 EXPOSE 3001
-CMD ["sh", "-c", "npm run migrate && node dist/index.js"]
+CMD ["node", "dist/index.js"]
     
