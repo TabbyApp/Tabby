@@ -207,7 +207,7 @@ transactionsRouter.put('/:id/subtotal', requireAuth, async (req, res) => {
   if (receiptRows.length > 0) return res.status(400).json({ error: 'Receipt already uploaded' });
 
   const sub = Math.max(0, Number(subtotal) || 0);
-  const tip = tx.tip_amount ?? 0;
+  const tip = Number(tx.tip_amount ?? 0);
   await query('UPDATE transactions SET subtotal = $1, total = $2 WHERE id = $3', [sub, sub + tip, id]);
   res.json({ subtotal: sub, total: sub + tip });
 });
@@ -277,7 +277,7 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
   ensureCreator(userId, tx);
 
   const memberIds = await getGroupMemberIds(tx.group_id);
-  const tip = tx.tip_amount ?? 0;
+  const tip = Number(tx.tip_amount ?? 0);
   let allocations: { user_id: string; amount: number }[] = [];
 
   if (tx.split_mode === 'EVEN_SPLIT') {
