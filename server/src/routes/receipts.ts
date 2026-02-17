@@ -200,12 +200,16 @@ receiptsRouter.get('/:receiptId', requireAuth, async (req, res) => {
   );
 
   const claims: Record<string, string[]> = {};
-  for (const item of items) {
-    const { rows: claimRows } = await query<{ user_id: string }>(
-      'SELECT user_id FROM item_claims WHERE receipt_item_id = $1',
-      [item.id]
+  if (items.length > 0) {
+    const itemIds = items.map((i) => i.id);
+    const { rows: claimRows } = await query<{ receipt_item_id: string; user_id: string }>(
+      'SELECT receipt_item_id, user_id FROM item_claims WHERE receipt_item_id = ANY($1)',
+      [itemIds]
     );
-    claims[item.id] = claimRows.map((x) => x.user_id);
+    for (const row of claimRows) {
+      if (!claims[row.receipt_item_id]) claims[row.receipt_item_id] = [];
+      claims[row.receipt_item_id].push(row.user_id);
+    }
   }
 
   const { rows: members } = await query<{ id: string; name: string; email: string }>(`
@@ -237,8 +241,8 @@ receiptsRouter.post('/:receiptId/items', requireAuth, async (req, res) => {
   }
 
   const id = genId();
-  const { rows: maxRows } = await query<{ m: string }>('SELECT COALESCE(MAX(sort_order), 0)::text as m FROM receipt_items WHERE receipt_id = $1', [receiptId]);
-  const maxOrder = parseInt(maxRows[0]?.m ?? '0', 10);
+  const { rows: maxRows } = await query<{ m: number }>('SELECT COALESCE(MAX(sort_order), 0)::int as m FROM receipt_items WHERE receipt_id = $1', [receiptId]);
+  const maxOrder = maxRows[0]?.m ?? 0;
   await query(
     'INSERT INTO receipt_items (id, receipt_id, name, price, sort_order) VALUES ($1, $2, $3, $4, $5)',
     [id, receiptId, String(name).trim(), price, maxOrder + 1]
@@ -268,12 +272,20 @@ receiptsRouter.put('/:receiptId/items/:itemId/claims', requireAuth, async (req, 
     return res.status(404).json({ error: 'Item not found' });
   }
 
-  const ids = Array.isArray(userIds) ? userIds : [];
+  const ids = Array.isArray(userIds) ? (userIds as string[]).filter(Boolean) : [];
   await query('DELETE FROM item_claims WHERE receipt_item_id = $1', [itemId]);
-  for (const uid of ids) {
-    const { rows: memberRows } = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [receipt.group_id, uid]);
-    if (memberRows.length > 0) {
-      await query('INSERT INTO item_claims (receipt_item_id, user_id) VALUES ($1, $2) ON CONFLICT (receipt_item_id, user_id) DO NOTHING', [itemId, uid]);
+  if (ids.length > 0) {
+    const { rows: memberRows } = await query<{ user_id: string }>(
+      'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2)',
+      [receipt.group_id, ids]
+    );
+    const validIds = memberRows.map((r) => r.user_id);
+    if (validIds.length > 0) {
+      const placeholders = validIds.map((_, i) => `($1, $${i + 2})`).join(', ');
+      await query(
+        `INSERT INTO item_claims (receipt_item_id, user_id) VALUES ${placeholders} ON CONFLICT (receipt_item_id, user_id) DO NOTHING`,
+        [itemId, ...validIds]
+      );
     }
   }
 

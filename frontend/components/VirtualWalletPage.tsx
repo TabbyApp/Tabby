@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, CreditCard, Plus, Power, PowerOff } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { PageType } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -14,23 +14,30 @@ interface VirtualWalletPageProps {
 export function VirtualWalletPage({ onNavigate, theme }: VirtualWalletPageProps) {
   const isDark = theme === 'dark';
   const { virtualCards } = useAuth();
+  const [deactivatedIds, setDeactivatedIds] = useState<Set<number>>(new Set());
   const cards = useMemo(() =>
-    virtualCards.map((c, i) => ({
-      id: i + 1,
-      group: c.groupName,
-      cardNumber: c.cardLastFour ?? '0000',
-      active: c.active,
-      balance: c.groupTotal ?? 0,
-      color: CARD_COLORS[i % CARD_COLORS.length],
-    })),
-    [virtualCards]
+    virtualCards.map((c, i) => {
+      const id = i + 1;
+      return {
+        id,
+        group: c.groupName,
+        cardNumber: c.cardLastFour ?? '0000',
+        active: !deactivatedIds.has(id) && c.active,
+        balance: c.groupTotal ?? 0,
+        color: CARD_COLORS[i % CARD_COLORS.length],
+      };
+    }),
+    [virtualCards, deactivatedIds]
   );
 
-  const toggleCardStatus = (id: number) => {
-    setCards(cards.map(card => 
-      card.id === id ? { ...card, active: !card.active } : card
-    ));
-  };
+  const toggleCardStatus = useCallback((id: number) => {
+    setDeactivatedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>

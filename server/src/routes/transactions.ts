@@ -105,9 +105,16 @@ transactionsRouter.get('/:id', requireAuth, async (req, res) => {
       [receipt.id]
     );
     items = itemRows;
-    for (const item of items) {
-      const { rows: claimRows } = await query<{ user_id: string }>('SELECT user_id FROM item_claims WHERE receipt_item_id = $1', [item.id]);
-      claims[item.id] = claimRows.map((x) => x.user_id);
+    if (items.length > 0) {
+      const itemIds = items.map((i) => i.id);
+      const { rows: claimRows } = await query<{ receipt_item_id: string; user_id: string }>(
+        'SELECT receipt_item_id, user_id FROM item_claims WHERE receipt_item_id = ANY($1)',
+        [itemIds]
+      );
+      for (const row of claimRows) {
+        if (!claims[row.receipt_item_id]) claims[row.receipt_item_id] = [];
+        claims[row.receipt_item_id].push(row.user_id);
+      }
     }
   }
 
@@ -241,13 +248,18 @@ transactionsRouter.put('/:id/items/:itemId/claims', requireAuth, async (req, res
   const { rows: itemRows } = await query<{ id: string }>('SELECT id FROM receipt_items WHERE id = $1 AND receipt_id = $2', [itemId, receipt.id]);
   if (itemRows.length === 0) return res.status(404).json({ error: 'Item not found' });
 
-  const ids = Array.isArray(userIds) ? userIds : [];
+  const ids = Array.isArray(userIds) ? [...new Set(userIds)] : [];
+  const validIds: string[] = [];
+  if (ids.length > 0) {
+    const { rows } = await query<{ user_id: string }>(
+      'SELECT user_id FROM group_members WHERE group_id = $1 AND user_id = ANY($2)',
+      [tx.group_id, ids]
+    );
+    validIds.push(...rows.map((r) => r.user_id));
+  }
   await query('DELETE FROM item_claims WHERE receipt_item_id = $1', [itemId]);
-  for (const uid of ids) {
-    const { rows: memberRows } = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [tx.group_id, uid]);
-    if (memberRows.length > 0) {
-      await query('INSERT INTO item_claims (receipt_item_id, user_id) VALUES ($1, $2) ON CONFLICT (receipt_item_id, user_id) DO NOTHING', [itemId, uid]);
-    }
+  for (const uid of validIds) {
+    await query('INSERT INTO item_claims (receipt_item_id, user_id) VALUES ($1, $2) ON CONFLICT (receipt_item_id, user_id) DO NOTHING', [itemId, uid]);
   }
   const { rows: claimRows } = await query<{ user_id: string }>('SELECT user_id FROM item_claims WHERE receipt_item_id = $1', [itemId]);
   res.json({ userIds: claimRows.map((c) => c.user_id) });
@@ -286,10 +298,22 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
     const userTotals: Record<string, number> = {};
     for (const uid of memberIds) userTotals[uid] = 0;
 
+    let claimsByItem: Record<string, string[]> = {};
+    if (items.length > 0) {
+      const itemIds = items.map((i) => i.id);
+      const { rows: claimRows } = await query<{ receipt_item_id: string; user_id: string }>(
+        'SELECT receipt_item_id, user_id FROM item_claims WHERE receipt_item_id = ANY($1)',
+        [itemIds]
+      );
+      for (const row of claimRows) {
+        if (!claimsByItem[row.receipt_item_id]) claimsByItem[row.receipt_item_id] = [];
+        claimsByItem[row.receipt_item_id].push(row.user_id);
+      }
+    }
+
     let unclaimedTotal = 0;
     for (const item of items) {
-      const { rows: claimRows } = await query<{ user_id: string }>('SELECT user_id FROM item_claims WHERE receipt_item_id = $1', [item.id]);
-      const uids = claimRows.map((c) => c.user_id);
+      const uids = claimsByItem[item.id] ?? [];
       if (uids.length === 0) {
         unclaimedTotal += item.price;
       } else {
@@ -320,7 +344,8 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
 
   const now = new Date().toISOString();
   const finalTotal = (tx.subtotal ?? 0) + (tx.tip_amount ?? 0);
-  await query('UPDATE transactions SET status = $1, finalized_at = $2, settled_at = $3, archived_at = $4 WHERE id = $5', ['SETTLED', now, now, now, id]);
+  await query('UPDATE transactions SET status = $1, finalized_at = $2 WHERE id = $3', ['FINALIZED', now, id]);
+  await query('UPDATE transactions SET status = $1, settled_at = $2, archived_at = $3 WHERE id = $4', ['SETTLED', now, now, id]);
   await query("UPDATE receipts SET status = 'completed', total = $1 WHERE transaction_id = $2", [finalTotal, id]);
   await query('DELETE FROM transaction_allocations WHERE transaction_id = $1', [id]);
   for (const a of allocations) {
@@ -329,9 +354,16 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
     }
   }
 
-  const withNames = await Promise.all(allocations.map(async (a) => {
-    const { rows } = await query<{ name: string }>('SELECT name FROM users WHERE id = $1', [a.user_id]);
-    return { user_id: a.user_id, amount: a.amount, name: rows[0]?.name ?? 'Unknown' };
+  const userIds = [...new Set(allocations.map((a) => a.user_id))];
+  const { rows: userRows } = await query<{ id: string; name: string }>(
+    'SELECT id, name FROM users WHERE id = ANY($1)',
+    [userIds]
+  );
+  const nameMap = new Map(userRows.map((u) => [u.id, u.name]));
+  const withNames = allocations.map((a) => ({
+    user_id: a.user_id,
+    amount: a.amount,
+    name: nameMap.get(a.user_id) ?? 'Unknown',
   }));
   res.json({ ok: true, allocations: withNames, status: 'SETTLED' });
 });

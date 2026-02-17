@@ -25,7 +25,7 @@ bootstrapRouter.get('/', requireAuth, async (req, res) => {
       WHERE gm.user_id = $1
       ORDER BY g.created_at DESC
     `, [userId]),
-    query<{ groupId: string; groupName: string; cardLastFour: string | null; groupTotal: string }>(`
+    query<{ groupId: string; groupName: string; cardLastFour: string | null; groupTotal: number }>(`
       WITH receipt_totals AS (
         SELECT r.group_id,
           COALESCE(r.total, (SELECT COALESCE(SUM(price), 0) FROM receipt_items WHERE receipt_id = r.id)) AS total
@@ -36,7 +36,7 @@ bootstrapRouter.get('/', requireAuth, async (req, res) => {
         SELECT group_id, COALESCE(SUM(total), 0) AS total FROM receipt_totals GROUP BY group_id
       )
       SELECT g.id AS "groupId", g.name AS "groupName", vc.card_number_last_four AS "cardLastFour",
-             COALESCE(gt.total::text, '0') AS "groupTotal"
+             COALESCE(gt.total, 0)::float AS "groupTotal"
       FROM groups g
       JOIN group_members gm ON g.id = gm.group_id
       LEFT JOIN virtual_cards vc ON g.id = vc.group_id
@@ -68,7 +68,7 @@ bootstrapRouter.get('/', requireAuth, async (req, res) => {
   const virtualCards = cardsRes.rows.map((c) => ({
     ...c,
     active: true,
-    groupTotal: parseFloat(c.groupTotal) || 0,
+    groupTotal: c.groupTotal ?? 0,
   }));
 
   res.json({

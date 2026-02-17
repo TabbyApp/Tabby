@@ -57,7 +57,7 @@ groupsRouter.get('/virtual-cards/list', requireAuth, async (req, res) => {
       SELECT group_id, COALESCE(SUM(total), 0) AS total FROM receipt_totals GROUP BY group_id
     )
     SELECT g.id AS "groupId", g.name AS "groupName", vc.card_number_last_four AS "cardLastFour",
-           COALESCE(gt.total::text, '0') AS "groupTotal"
+           COALESCE(gt.total, 0)::float AS "groupTotal"
     FROM groups g
     JOIN group_members gm ON g.id = gm.group_id
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
@@ -66,7 +66,7 @@ groupsRouter.get('/virtual-cards/list', requireAuth, async (req, res) => {
     ORDER BY g.created_at DESC
   `, [userId]);
 
-  res.json(cards.map((c) => ({ ...c, active: true, groupTotal: parseFloat(c.groupTotal) || 0 })));
+  res.json(cards.map((c) => ({ ...c, active: true, groupTotal: c.groupTotal ?? 0 })));
 });
 
 // Batch fetch group details - batched queries (no N+1)
