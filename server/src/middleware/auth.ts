@@ -48,7 +48,6 @@ export function verifyRefreshToken(token: string): JwtPayload | null {
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const start = (res as any).__timingStart != null ? (res as any).__timingStart : Date.now();
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
 

@@ -1,6 +1,10 @@
 import pg from "pg";
 const { Pool } = pg;
 
+// Parse NUMERIC/DECIMAL and FLOAT8 as JS numbers (pg returns them as strings by default)
+pg.types.setTypeParser(1700, parseFloat); // NUMERIC
+pg.types.setTypeParser(701, parseFloat);  // FLOAT8
+
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required");
 }

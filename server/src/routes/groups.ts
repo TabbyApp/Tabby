@@ -96,13 +96,19 @@ groupsRouter.get('/batch', requireAuth, async (req, res) => {
   const groupMap = new Map<string, (typeof groupRows)[0]>();
   for (const g of groupRows) groupMap.set(g.id, g);
 
-  // 2) Ensure invite_token exists where missing
+  // 2) Ensure invite_token exists where missing (only update if NULL to avoid race overwrites)
   const needToken = groupRows.filter((g) => !g.invite_token);
   if (needToken.length > 0) {
     await Promise.all(needToken.map(async (g) => {
       const tok = crypto.randomBytes(12).toString('hex');
-      await query('UPDATE groups SET invite_token = $1 WHERE id = $2', [tok, g.id]);
-      groupMap.set(g.id, { ...g, invite_token: tok });
+      const { rowCount } = await query('UPDATE groups SET invite_token = $1 WHERE id = $2 AND invite_token IS NULL', [tok, g.id]);
+      if (rowCount && rowCount > 0) {
+        groupMap.set(g.id, { ...g, invite_token: tok });
+      } else {
+        const { rows } = await query<{ invite_token: string }>('SELECT invite_token FROM groups WHERE id = $1', [g.id]);
+        const existing = rows[0]?.invite_token;
+        if (existing) groupMap.set(g.id, { ...g, invite_token: existing });
+      }
     }));
   }
 
@@ -267,8 +273,14 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
 
   let inviteToken = row.invite_token;
   if (!inviteToken) {
-    inviteToken = crypto.randomBytes(12).toString('hex');
-    await query('UPDATE groups SET invite_token = $1 WHERE id = $2', [inviteToken, groupId]);
+    const tok = crypto.randomBytes(12).toString('hex');
+    const upd = await query('UPDATE groups SET invite_token = $1 WHERE id = $2 AND invite_token IS NULL', [tok, groupId]);
+    if (upd.rowCount && upd.rowCount > 0) {
+      inviteToken = tok;
+    } else {
+      const { rows } = await query<{ invite_token: string }>('SELECT invite_token FROM groups WHERE id = $1', [groupId]);
+      inviteToken = rows[0]?.invite_token ?? tok;
+    }
   }
 
   const { rows: members } = await query<{ id: string; name: string; email: string }>(

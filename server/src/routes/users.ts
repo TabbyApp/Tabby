@@ -83,7 +83,9 @@ usersRouter.patch('/me', requireAuth, async (req, res) => {
     'SELECT id, email, name, COALESCE(phone, \'\') as phone FROM users WHERE id = $1',
     [userId]
   );
-  res.json(updatedRows[0]);
+  const updated = updatedRows[0];
+  if (!updated) return res.status(404).json({ error: 'User not found' });
+  res.json(updated);
 });
 
 // Stub: link bank (MVP - no Plaid, just marks user as bank_linked)

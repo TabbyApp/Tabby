@@ -14,23 +14,20 @@ interface VirtualWalletPageProps {
 export function VirtualWalletPage({ onNavigate, theme }: VirtualWalletPageProps) {
   const isDark = theme === 'dark';
   const { virtualCards } = useAuth();
-  const [deactivatedIds, setDeactivatedIds] = useState<Set<number>>(new Set());
+  const [deactivatedIds, setDeactivatedIds] = useState<Set<string>>(new Set());
   const cards = useMemo(() =>
-    virtualCards.map((c, i) => {
-      const id = i + 1;
-      return {
-        id,
-        group: c.groupName,
-        cardNumber: c.cardLastFour ?? '0000',
-        active: !deactivatedIds.has(id) && c.active,
-        balance: c.groupTotal ?? 0,
-        color: CARD_COLORS[i % CARD_COLORS.length],
-      };
-    }),
+    virtualCards.map((c, i) => ({
+      id: c.groupId,
+      group: c.groupName,
+      cardNumber: c.cardLastFour ?? '0000',
+      active: !deactivatedIds.has(c.groupId) && c.active,
+      balance: c.groupTotal ?? 0,
+      color: CARD_COLORS[i % CARD_COLORS.length],
+    })),
     [virtualCards, deactivatedIds]
   );
 
-  const toggleCardStatus = useCallback((id: number) => {
+  const toggleCardStatus = useCallback((groupId: string) => {
     setDeactivatedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);

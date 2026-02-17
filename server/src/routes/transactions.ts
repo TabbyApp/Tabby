@@ -166,7 +166,7 @@ transactionsRouter.post('/:id/receipt', requireAuth, upload.single('file'), asyn
 
     const receiptId = genId();
     const filePath = `/uploads/${file.filename}`;
-    const subtotal = items.reduce((s, i) => s + i.price, 0);
+    const subtotal = items.reduce((s, i) => s + Number(i.price), 0);
 
     await query(`
       INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status, transaction_id)
@@ -225,7 +225,7 @@ transactionsRouter.put('/:id/tip', requireAuth, async (req, res) => {
   ensureCreator(userId, tx);
 
   const tip = Math.max(0, Number(tipAmount) || 0);
-  const subtotal = tx.subtotal ?? 0;
+  const subtotal = Number(tx.subtotal ?? 0);
   await query('UPDATE transactions SET tip_amount = $1, subtotal = $2, total = $3 WHERE id = $4', [tip, subtotal, subtotal + tip, id]);
   res.json({ tip_amount: tip, subtotal, total: subtotal + tip });
 });
@@ -281,7 +281,7 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
   let allocations: { user_id: string; amount: number }[] = [];
 
   if (tx.split_mode === 'EVEN_SPLIT') {
-    const subtotal = tx.subtotal ?? 0;
+    const subtotal = Number(tx.subtotal ?? 0);
     const total = subtotal + tip;
     const perPerson = total / memberIds.length;
     const rounded = memberIds.map(() => Math.round(perPerson * 100) / 100);
@@ -313,11 +313,12 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
 
     let unclaimedTotal = 0;
     for (const item of items) {
+      const price = Number(item.price);
       const uids = claimsByItem[item.id] ?? [];
       if (uids.length === 0) {
-        unclaimedTotal += item.price;
+        unclaimedTotal += price;
       } else {
-        const share = item.price / uids.length;
+        const share = price / uids.length;
         for (const uid of uids) userTotals[uid] = (userTotals[uid] ?? 0) + share;
       }
     }
@@ -326,7 +327,7 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
       for (const uid of memberIds) userTotals[uid] = (userTotals[uid] ?? 0) + share;
     }
 
-    const subtotal = items.reduce((s, i) => s + i.price, 0);
+    const subtotal = items.reduce((s, i) => s + Number(i.price), 0);
     const total = subtotal + tip;
     const sumUserTotals = Object.values(userTotals).reduce((a, b) => a + b, 0);
     const tipRatio = sumUserTotals > 0 ? tip / sumUserTotals : 1 / memberIds.length;
@@ -343,9 +344,8 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const finalTotal = (tx.subtotal ?? 0) + (tx.tip_amount ?? 0);
+  const finalTotal = Number(tx.subtotal ?? 0) + Number(tx.tip_amount ?? 0);
   await query('UPDATE transactions SET status = $1, finalized_at = $2 WHERE id = $3', ['FINALIZED', now, id]);
-  await query('UPDATE transactions SET status = $1, settled_at = $2, archived_at = $3 WHERE id = $4', ['SETTLED', now, now, id]);
   await query("UPDATE receipts SET status = 'completed', total = $1 WHERE transaction_id = $2", [finalTotal, id]);
   await query('DELETE FROM transaction_allocations WHERE transaction_id = $1', [id]);
   for (const a of allocations) {
@@ -377,7 +377,7 @@ export async function runFallbackForTransaction(id: string): Promise<boolean> {
   if (Date.now() < deadline) return false;
 
   const memberIds = await getGroupMemberIds(tx.group_id);
-  const subtotal = tx.subtotal ?? 0;
+  const subtotal = Number(tx.subtotal ?? 0);
   const total = subtotal + 0;
   const perPerson = total / memberIds.length;
   const rounded = memberIds.map(() => Math.round(perPerson * 100) / 100);
@@ -408,7 +408,7 @@ transactionsRouter.post('/:id/fallback-even', requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Settle (simulated). Called after finalize or by timer.
+// Settle: FINALIZED → SETTLED. Called after payment (ProcessingPaymentPage) or by timer.
 transactionsRouter.post('/:id/settle', requireAuth, async (req, res) => {
   const { id } = req.params;
   const { rows } = await query('SELECT * FROM transactions WHERE id = $1', [id]);
