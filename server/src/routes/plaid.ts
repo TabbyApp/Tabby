@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import { Configuration, PlaidApi, PlaidEnvironments } from 'plaid';
-import { db } from '../db.js';
+import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 
 export const plaidRouter = Router();
@@ -91,12 +91,14 @@ plaidRouter.post('/exchange', requireAuth, async (req, res) => {
     const accessToken = exchangeResponse.data.access_token;
     const itemId = exchangeResponse.data.item_id;
 
+    await query(
+      `INSERT INTO plaid_items (id, user_id, item_id, access_token) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (item_id) DO UPDATE SET access_token = EXCLUDED.access_token, user_id = EXCLUDED.user_id`,
+      [genId(), userId, itemId, accessToken]
+    );
+
     const accountsResponse = await plaidClient.accountsGet({ access_token: accessToken });
     const accounts = accountsResponse.data.accounts || [];
-
-    db.prepare(
-      'INSERT OR REPLACE INTO plaid_items (id, user_id, item_id, access_token) VALUES (?, ?, ?, ?)'
-    ).run(genId(), userId, itemId, accessToken);
 
     const depositoryAccounts = accounts.filter(
       (a: { type?: string }) => a.type === 'depository'
@@ -109,16 +111,18 @@ plaidRouter.post('/exchange', requireAuth, async (req, res) => {
       const name = (account as { name?: string }).name ?? 'Bank account';
       if (!accountId) continue;
 
-      const existing = db.prepare(
-        'SELECT id FROM payment_methods WHERE user_id = ? AND plaid_account_id = ?'
-      ).get(userId, accountId) as { id: string } | undefined;
+      const { rows: existingRows } = await query<{ id: string }>(
+        'SELECT id FROM payment_methods WHERE user_id = $1 AND plaid_account_id = $2',
+        [userId, accountId]
+      );
 
-      if (existing) continue;
+      if (existingRows.length > 0) continue;
 
       const pmId = genId();
-      db.prepare(
-        `INSERT INTO payment_methods (id, user_id, type, last_four, brand, plaid_account_id, plaid_item_id) VALUES (?, ?, 'bank', ?, ?, ?, ?)`
-      ).run(pmId, userId, mask, name, accountId, itemId);
+      await query(
+        `INSERT INTO payment_methods (id, user_id, type, last_four, brand, plaid_account_id, plaid_item_id) VALUES ($1, $2, 'bank', $3, $4, $5, $6)`,
+        [pmId, userId, mask, name, accountId, itemId]
+      );
       created.push({ id: pmId, type: 'bank', last_four: mask, brand: null });
     }
 

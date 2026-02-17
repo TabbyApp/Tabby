@@ -1,8 +1,8 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, CreditCard, Plus, Power, PowerOff } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { PageType } from '../App';
-import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const CARD_COLORS = ['#3B82F6', '#A855F7', '#22C55E', '#F97316', '#EC4899'];
 
@@ -13,26 +13,28 @@ interface VirtualWalletPageProps {
 
 export function VirtualWalletPage({ onNavigate, theme }: VirtualWalletPageProps) {
   const isDark = theme === 'dark';
-  const [cards, setCards] = useState<{ id: number; group: string; cardNumber: string; active: boolean; balance: number; color: string }[]>([]);
+  const { virtualCards } = useAuth();
+  const [deactivatedIds, setDeactivatedIds] = useState<Set<string>>(new Set());
+  const cards = useMemo(() =>
+    virtualCards.map((c, i) => ({
+      id: c.groupId,
+      group: c.groupName,
+      cardNumber: c.cardLastFour ?? '0000',
+      active: !deactivatedIds.has(c.groupId) && c.active,
+      balance: c.groupTotal ?? 0,
+      color: CARD_COLORS[i % CARD_COLORS.length],
+    })),
+    [virtualCards, deactivatedIds]
+  );
 
-  useEffect(() => {
-    api.groups.virtualCards().then((data) => {
-      setCards(data.map((c, i) => ({
-        id: i + 1,
-        group: c.groupName,
-        cardNumber: c.cardLastFour ?? '0000',
-        active: c.active,
-        balance: c.groupTotal ?? 0,
-        color: CARD_COLORS[i % CARD_COLORS.length],
-      })));
-    }).catch(() => {});
+  const toggleCardStatus = useCallback((groupId: string) => {
+    setDeactivatedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
   }, []);
-
-  const toggleCardStatus = (id: number) => {
-    setCards(cards.map(card => 
-      card.id === id ? { ...card, active: !card.active } : card
-    ));
-  };
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>

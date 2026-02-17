@@ -14,15 +14,14 @@ export function LinkBankPage({ onNavigate, theme }: LinkBankPageProps) {
   const isDark = theme === 'dark';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const { setUser } = useAuth();
+  const { refreshBootstrap } = useAuth();
 
   const handleLinkBank = async () => {
     setError('');
     setLoading(true);
     try {
       await api.users.linkBank();
-      const me = await api.users.me();
-      setUser({ ...me, bank_linked: me.bank_linked });
+      await refreshBootstrap();
       onNavigate('home');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to link bank');

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import crypto from 'crypto';
-import { db } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { requireAuth, requireBankLinked } from '../middleware/auth.js';
 
 export const groupsRouter = Router();
@@ -18,24 +18,24 @@ function generateCardNumber(): string {
 }
 
 // List user's groups with virtual card info
-groupsRouter.get('/', requireAuth, (req, res) => {
+groupsRouter.get('/', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
 
-  const groups = db.prepare(`
+  const { rows: groups } = await query<{ id: string; name: string; created_by: string; created_at: string; card_number_last_four: string | null; member_count: string }>(`
     SELECT g.id, g.name, g.created_by, g.created_at,
            vc.card_number_last_four,
-           (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) as member_count
+           (SELECT COUNT(*)::text FROM group_members WHERE group_id = g.id) as member_count
     FROM groups g
     JOIN group_members gm ON g.id = gm.group_id
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
-    WHERE gm.user_id = ?
+    WHERE gm.user_id = $1
     ORDER BY g.created_at DESC
-  `).all(userId) as { id: string; name: string; created_by: string; created_at: string; card_number_last_four: string | null; member_count: number }[];
+  `, [userId]);
 
   res.json(groups.map((g) => ({
     id: g.id,
     name: g.name,
-    memberCount: g.member_count,
+    memberCount: parseInt(g.member_count, 10),
     cardLastFour: g.card_number_last_four,
     createdAt: g.created_at,
   })));
@@ -43,32 +43,33 @@ groupsRouter.get('/', requireAuth, (req, res) => {
 
 // IMPORTANT: specific routes must come before /:groupId
 // Get virtual cards for user's groups with total spent (completed receipts)
-groupsRouter.get('/virtual-cards/list', requireAuth, (req, res) => {
+groupsRouter.get('/virtual-cards/list', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
 
-  const cards = db.prepare(`
-    SELECT g.id as groupId, g.name as groupName, vc.card_number_last_four as cardLastFour,
-           COALESCE(
-             (SELECT SUM(COALESCE(r.total, (SELECT SUM(price) FROM receipt_items WHERE receipt_id = r.id)))
-              FROM receipts r WHERE r.group_id = g.id AND r.status = 'completed'),
-             0
-           ) as groupTotal
+  const { rows: cards } = await query<{ groupId: string; groupName: string; cardLastFour: string | null; groupTotal: string }>(`
+    WITH receipt_totals AS (
+      SELECT r.group_id,
+        COALESCE(r.total, (SELECT COALESCE(SUM(price), 0) FROM receipt_items WHERE receipt_id = r.id)) AS total
+      FROM receipts r
+      WHERE r.status = 'completed'
+    ),
+    group_totals AS (
+      SELECT group_id, COALESCE(SUM(total), 0) AS total FROM receipt_totals GROUP BY group_id
+    )
+    SELECT g.id AS "groupId", g.name AS "groupName", vc.card_number_last_four AS "cardLastFour",
+           COALESCE(gt.total, 0)::float AS "groupTotal"
     FROM groups g
     JOIN group_members gm ON g.id = gm.group_id
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
-    WHERE gm.user_id = ?
+    LEFT JOIN group_totals gt ON g.id = gt.group_id
+    WHERE gm.user_id = $1
     ORDER BY g.created_at DESC
-  `).all(userId) as { groupId: string; groupName: string; cardLastFour: string | null; groupTotal: number }[];
+  `, [userId]);
 
   res.json(cards.map((c) => ({ ...c, active: true, groupTotal: c.groupTotal ?? 0 })));
 });
 
-// Yield to event loop so /users/me and other requests can run (avoids blocking 7s+)
-function yieldToEventLoop(): Promise<void> {
-  return new Promise((r) => setImmediate(r));
-}
-
-// Batch fetch group details (reduces N requests to 1 - avoids connection queueing)
+// Batch fetch group details - batched queries (no N+1)
 groupsRouter.get('/batch', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const idsParam = req.query.ids as string | undefined;
@@ -82,68 +83,123 @@ groupsRouter.get('/batch', requireAuth, async (req, res) => {
     cardLastFour: string | null; inviteToken: string;
     receipts: { id: string; group_id: string; status: string; total: number | null; created_at: string; splits?: unknown[] }[];
   };
-  const out: Record<string, BatchGroup> = {};
 
-  const groupStmt = db.prepare(`
+  // 1) Get groups user is member of, with invite_token and card
+  const { rows: groupRows } = await query<{ id: string; name: string; created_by: string; invite_token: string | null; card_number_last_four: string | null }>(`
     SELECT g.id, g.name, g.created_by, g.invite_token, vc.card_number_last_four
     FROM groups g
+    JOIN group_members gm ON g.id = gm.group_id
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
-    WHERE g.id = ?
-  `);
-  const memberStmt = db.prepare(`
-    SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?
-  `);
-  const membersStmt = db.prepare(`
-    SELECT u.id, u.name, u.email
+    WHERE gm.user_id = $1 AND g.id = ANY($2::text[])
+  `, [userId, ids]);
+
+  const groupMap = new Map<string, (typeof groupRows)[0]>();
+  for (const g of groupRows) groupMap.set(g.id, g);
+
+  // 2) Ensure invite_token exists where missing (only update if NULL to avoid race overwrites)
+  const needToken = groupRows.filter((g) => !g.invite_token);
+  if (needToken.length > 0) {
+    await Promise.all(needToken.map(async (g) => {
+      const tok = crypto.randomBytes(12).toString('hex');
+      const { rowCount } = await query('UPDATE groups SET invite_token = $1 WHERE id = $2 AND invite_token IS NULL', [tok, g.id]);
+      if (rowCount && rowCount > 0) {
+        groupMap.set(g.id, { ...g, invite_token: tok });
+      } else {
+        const { rows } = await query<{ invite_token: string }>('SELECT invite_token FROM groups WHERE id = $1', [g.id]);
+        const existing = rows[0]?.invite_token;
+        if (existing) groupMap.set(g.id, { ...g, invite_token: existing });
+      }
+    }));
+  }
+
+  // 3) Batch fetch members for all groups
+  const { rows: memberRows } = await query<{ group_id: string; id: string; name: string; email: string }>(`
+    SELECT gm.group_id, u.id, u.name, u.email
     FROM group_members gm
     JOIN users u ON gm.user_id = u.id
-    WHERE gm.group_id = ?
-  `);
+    WHERE gm.group_id = ANY($1::text[])
+  `, [groupRows.map(g => g.id)]);
+  const membersByGroup = new Map<string, { id: string; name: string; email: string }[]>();
+  for (const m of memberRows) {
+    const list = membersByGroup.get(m.group_id) ?? [];
+    list.push({ id: m.id, name: m.name, email: m.email });
+    membersByGroup.set(m.group_id, list);
+  }
 
-  for (const groupId of ids) {
-    await yieldToEventLoop(); // Let /users/me and other quick requests run
+  // 4) Batch fetch receipts for all groups
+  const { rows: receiptRows } = await query<{ id: string; group_id: string; status: string; total: number | null; created_at: string; transaction_id: string | null }>(`
+    SELECT id, group_id, status, total, created_at, transaction_id
+    FROM receipts
+    WHERE group_id = ANY($1::text[])
+    ORDER BY group_id, created_at DESC
+  `, [groupRows.map(g => g.id)]);
 
-    const isMember = memberStmt.get(groupId, userId);
-    if (!isMember) continue;
+  const txIds = [...new Set(receiptRows.map(r => r.transaction_id).filter(Boolean) as string[])];
 
-    let group = groupStmt.get(groupId) as { id: string; name: string; created_by: string; invite_token: string | null; card_number_last_four: string | null } | undefined;
-    if (!group) continue;
+  // 5) Batch fetch splits: transaction_allocations for receipts with transaction_id
+  let txAllocations: { transaction_id: string; user_id: string; amount: number; name: string }[] = [];
+  if (txIds.length > 0) {
+    const { rows: ta } = await query<{ transaction_id: string; user_id: string; amount: number; name: string }>(`
+      SELECT ta.transaction_id, ta.user_id, ta.amount, u.name
+      FROM transaction_allocations ta
+      JOIN users u ON ta.user_id = u.id
+      WHERE ta.transaction_id = ANY($1::text[])
+    `, [txIds]);
+    txAllocations = ta;
+  }
 
-    let inviteToken = group.invite_token;
-    if (!inviteToken) {
-      inviteToken = crypto.randomBytes(12).toString('hex');
-      db.prepare('UPDATE groups SET invite_token = ? WHERE id = ?').run(inviteToken, groupId);
-    }
+  // 6) Batch fetch receipt_splits for receipts without transaction_id
+  const receiptIdsNoTx = receiptRows.filter(r => !r.transaction_id).map(r => r.id);
+  let receiptSplits: { receipt_id: string; user_id: string; amount: number; status: string; name: string }[] = [];
+  if (receiptIdsNoTx.length > 0) {
+    const { rows: rs } = await query<{ receipt_id: string; user_id: string; amount: number; status: string; name: string }>(`
+      SELECT rs.receipt_id, rs.user_id, rs.amount, rs.status, u.name
+      FROM receipt_splits rs
+      JOIN users u ON rs.user_id = u.id
+      WHERE rs.receipt_id = ANY($1::text[])
+    `, [receiptIdsNoTx]);
+    receiptSplits = rs;
+  }
 
-    const members = membersStmt.all(groupId) as { id: string; name: string; email: string }[];
-    const receipts = db.prepare(
-      'SELECT id, group_id, status, total, created_at, transaction_id FROM receipts WHERE group_id = ? ORDER BY created_at DESC'
-    ).all(groupId) as { id: string; group_id: string; status: string; total: number | null; created_at: string; transaction_id: string | null }[];
+  const txAllocByTx = new Map<string, { user_id: string; amount: number; status: string; name: string }[]>();
+  for (const ta of txAllocations) {
+    const list = txAllocByTx.get(ta.transaction_id) ?? [];
+    list.push({ user_id: ta.user_id, amount: ta.amount, status: 'completed', name: ta.name });
+    txAllocByTx.set(ta.transaction_id, list);
+  }
+  const splitsByReceipt = new Map<string, { user_id: string; amount: number; status: string; name: string }[]>();
+  for (const s of receiptSplits) {
+    const list = splitsByReceipt.get(s.receipt_id) ?? [];
+    list.push({ user_id: s.user_id, amount: s.amount, status: s.status, name: s.name });
+    splitsByReceipt.set(s.receipt_id, list);
+  }
+
+  type ReceiptRow = (typeof receiptRows)[0];
+  const receiptsByGroup = new Map<string, ReceiptRow[]>();
+  for (const r of receiptRows) {
+    const list = receiptsByGroup.get(r.group_id) ?? [];
+    list.push(r);
+    receiptsByGroup.set(r.group_id, list);
+  }
+
+  const out: Record<string, BatchGroup> = {};
+  for (const g of groupRows) {
+    const group = groupMap.get(g.id)!;
+    const members = membersByGroup.get(g.id) ?? [];
+    const receipts = receiptsByGroup.get(g.id) ?? [];
     const receiptsWithSplits = receipts.map((r) => {
-      try {
-        let splits: { user_id: string; amount: number; status: string; name: string }[];
-        if (r.transaction_id) {
-          splits = db.prepare(
-            `SELECT ta.user_id, ta.amount, 'completed' as status, u.name FROM transaction_allocations ta JOIN users u ON ta.user_id = u.id WHERE ta.transaction_id = ?`
-          ).all(r.transaction_id) as { user_id: string; amount: number; status: string; name: string }[];
-        } else {
-          splits = db.prepare(
-            `SELECT rs.user_id, rs.amount, rs.status, u.name FROM receipt_splits rs JOIN users u ON rs.user_id = u.id WHERE rs.receipt_id = ?`
-          ).all(r.id) as { user_id: string; amount: number; status: string; name: string }[];
-        }
-        return { ...r, splits };
-      } catch {
-        return { ...r, splits: [] };
-      }
+      const splits = r.transaction_id
+        ? (txAllocByTx.get(r.transaction_id) ?? [])
+        : (splitsByReceipt.get(r.id) ?? []);
+      return { ...r, splits };
     });
-
-    out[groupId] = {
+    out[g.id] = {
       id: group.id,
       name: group.name,
       created_by: group.created_by,
       members,
       cardLastFour: group.card_number_last_four,
-      inviteToken,
+      inviteToken: group.invite_token!,
       receipts: receiptsWithSplits,
     };
   }
@@ -152,7 +208,7 @@ groupsRouter.get('/batch', requireAuth, async (req, res) => {
 });
 
 // Create group and unique virtual card
-groupsRouter.post('/', requireAuth, requireBankLinked, (req, res) => {
+groupsRouter.post('/', requireAuth, requireBankLinked, async (req, res) => {
   const { userId } = (req as any).user;
   const { name, memberEmails } = req.body;
 
@@ -165,64 +221,72 @@ groupsRouter.post('/', requireAuth, requireBankLinked, (req, res) => {
   const cardLastFour = generateCardNumber();
   const inviteToken = crypto.randomBytes(12).toString('hex');
 
-  db.transaction(() => {
-    db.prepare('INSERT INTO groups (id, name, created_by, invite_token) VALUES (?, ?, ?, ?)').run(groupId, name.trim(), userId, inviteToken);
-    db.prepare('INSERT INTO group_members (group_id, user_id) VALUES (?, ?)').run(groupId, userId);
-    db.prepare('INSERT INTO virtual_cards (id, group_id, card_number_last_four) VALUES (?, ?, ?)').run(cardId, groupId, cardLastFour);
+  await withTransaction(async (client) => {
+    await client.query('INSERT INTO groups (id, name, created_by, invite_token) VALUES ($1, $2, $3, $4)', [groupId, name.trim(), userId, inviteToken]);
+    await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1, $2)', [groupId, userId]);
+    await client.query('INSERT INTO virtual_cards (id, group_id, card_number_last_four) VALUES ($1, $2, $3)', [cardId, groupId, cardLastFour]);
 
     const emails = Array.isArray(memberEmails) ? memberEmails : [];
     for (const email of emails) {
       const e = String(email).trim().toLowerCase();
       if (!e) continue;
-      const member = db.prepare('SELECT id FROM users WHERE email = ?').get(e) as { id: string } | undefined;
+      const { rows: memberRows } = await client.query<{ id: string }>('SELECT id FROM users WHERE email = $1', [e]);
+      const member = memberRows[0];
       if (member && member.id !== userId) {
-        db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)').run(groupId, member.id);
+        await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT (group_id, user_id) DO NOTHING', [groupId, member.id]);
       }
     }
-  })();
+  });
 
-  const group = db.prepare(`
-    SELECT g.id, g.name, g.created_at,
-           vc.card_number_last_four,
-           (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) as member_count
+  const { rows: groupRows } = await query<{ id: string; name: string; created_at: string; card_number_last_four: string; member_count: string }>(`
+    SELECT g.id, g.name, g.created_at, vc.card_number_last_four,
+           (SELECT COUNT(*)::text FROM group_members WHERE group_id = g.id) as member_count
     FROM groups g
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
-    WHERE g.id = ?
-  `).get(groupId) as { id: string; name: string; created_at: string; card_number_last_four: string; member_count: number };
+    WHERE g.id = $1
+  `, [groupId]);
+  const group = groupRows[0]!;
 
   res.status(201).json({
     ...group,
-    memberCount: group.member_count,
+    memberCount: parseInt(group.member_count, 10),
     cardLastFour: group.card_number_last_four,
   });
 });
 
 // Get single group with members (optimized: combined auth+group query)
-groupsRouter.get('/:groupId', requireAuth, (req, res) => {
+groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
 
-  const row = db.prepare(`
+  const { rows } = await query<{ id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number }>(`
     SELECT g.id, g.name, g.created_by, g.created_at, g.invite_token,
            vc.card_number_last_four,
-           (SELECT 1 FROM group_members WHERE group_id = g.id AND user_id = ? LIMIT 1) as is_member
+           (SELECT COUNT(*)::int FROM group_members WHERE group_id = g.id AND user_id = $1) as is_member
     FROM groups g
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
-    WHERE g.id = ?
-  `).get(userId, groupId) as { id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number } | undefined;
+    WHERE g.id = $2
+  `, [userId, groupId]);
+  const row = rows[0];
 
   if (!row || !row.is_member) return res.status(404).json({ error: 'Group not found' });
 
   let inviteToken = row.invite_token;
   if (!inviteToken) {
-    inviteToken = crypto.randomBytes(12).toString('hex');
-    db.prepare('UPDATE groups SET invite_token = ? WHERE id = ?').run(inviteToken, groupId);
+    const tok = crypto.randomBytes(12).toString('hex');
+    const upd = await query('UPDATE groups SET invite_token = $1 WHERE id = $2 AND invite_token IS NULL', [tok, groupId]);
+    if (upd.rowCount && upd.rowCount > 0) {
+      inviteToken = tok;
+    } else {
+      const { rows } = await query<{ invite_token: string }>('SELECT invite_token FROM groups WHERE id = $1', [groupId]);
+      inviteToken = rows[0]?.invite_token ?? tok;
+    }
   }
 
-  const members = db.prepare(`
-    SELECT u.id, u.name, u.email FROM group_members gm
-    JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ?
-  `).all(groupId) as { id: string; name: string; email: string }[];
+  const { rows: members } = await query<{ id: string; name: string; email: string }>(
+    'SELECT u.id, u.name, u.email FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = $1',
+    [groupId]
+  );
 
   res.json({
     id: row.id, name: row.name, created_by: row.created_by, created_at: row.created_at,
@@ -231,85 +295,87 @@ groupsRouter.get('/:groupId', requireAuth, (req, res) => {
 });
 
 // Join group via invite token (user becomes member immediately)
-groupsRouter.post('/join/:token', requireAuth, requireBankLinked, (req, res) => {
+groupsRouter.post('/join/:token', requireAuth, requireBankLinked, async (req, res) => {
   const { userId } = (req as any).user;
   const { token } = req.params;
 
-  const group = db.prepare('SELECT id, name FROM groups WHERE invite_token = ?').get(token) as { id: string; name: string } | undefined;
+  const { rows } = await query<{ id: string; name: string }>('SELECT id, name FROM groups WHERE invite_token = $1', [token]);
+  const group = rows[0];
   if (!group) return res.status(404).json({ error: 'Invalid invite link' });
 
-  db.prepare('INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)').run(group.id, userId);
+  await query('INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT (group_id, user_id) DO NOTHING', [group.id, userId]);
   res.json({ groupId: group.id, groupName: group.name, joined: true });
 });
 
 // Delete group (host only)
-groupsRouter.delete('/:groupId', requireAuth, (req, res) => {
+groupsRouter.delete('/:groupId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
 
-  const group = db.prepare('SELECT created_by FROM groups WHERE id = ?').get(groupId) as { created_by: string } | undefined;
+  const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
+  const group = groupRows[0];
   if (!group) return res.status(404).json({ error: 'Group not found' });
   if (group.created_by !== userId) return res.status(403).json({ error: 'Only the host can delete this group' });
 
-  db.transaction(() => {
-    // Clean up all related data
-    const receiptIds = db.prepare('SELECT id FROM receipts WHERE group_id = ?').all(groupId) as { id: string }[];
-    for (const r of receiptIds) {
-      db.prepare('DELETE FROM item_claims WHERE receipt_item_id IN (SELECT id FROM receipt_items WHERE receipt_id = ?)').run(r.id);
-      db.prepare('DELETE FROM receipt_items WHERE receipt_id = ?').run(r.id);
-      db.prepare('DELETE FROM receipt_splits WHERE receipt_id = ?').run(r.id);
+  await withTransaction(async (client) => {
+    const { rows: receiptRows } = await client.query<{ id: string }>('SELECT id FROM receipts WHERE group_id = $1', [groupId]);
+    for (const r of receiptRows) {
+      await client.query('DELETE FROM item_claims WHERE receipt_item_id IN (SELECT id FROM receipt_items WHERE receipt_id = $1)', [r.id]);
+      await client.query('DELETE FROM receipt_items WHERE receipt_id = $1', [r.id]);
+      await client.query('DELETE FROM receipt_splits WHERE receipt_id = $1', [r.id]);
     }
-    db.prepare('DELETE FROM receipts WHERE group_id = ?').run(groupId);
+    await client.query('DELETE FROM receipts WHERE group_id = $1', [groupId]);
 
-    const txIds = db.prepare('SELECT id FROM transactions WHERE group_id = ?').all(groupId) as { id: string }[];
-    for (const t of txIds) {
-      db.prepare('DELETE FROM transaction_allocations WHERE transaction_id = ?').run(t.id);
+    const { rows: txRows } = await client.query<{ id: string }>('SELECT id FROM transactions WHERE group_id = $1', [groupId]);
+    for (const t of txRows) {
+      await client.query('DELETE FROM transaction_allocations WHERE transaction_id = $1', [t.id]);
     }
-    db.prepare('DELETE FROM transactions WHERE group_id = ?').run(groupId);
-
-    db.prepare('DELETE FROM virtual_cards WHERE group_id = ?').run(groupId);
-    db.prepare('DELETE FROM group_members WHERE group_id = ?').run(groupId);
-    db.prepare('DELETE FROM groups WHERE id = ?').run(groupId);
-  })();
+    await client.query('DELETE FROM transactions WHERE group_id = $1', [groupId]);
+    await client.query('DELETE FROM virtual_cards WHERE group_id = $1', [groupId]);
+    await client.query('DELETE FROM group_members WHERE group_id = $1', [groupId]);
+    await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
+  });
 
   res.json({ ok: true });
 });
 
 // Leave group (non-host members only)
-groupsRouter.post('/:groupId/leave', requireAuth, (req, res) => {
+groupsRouter.post('/:groupId/leave', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
 
-  const group = db.prepare('SELECT created_by FROM groups WHERE id = ?').get(groupId) as { created_by: string } | undefined;
+  const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
+  const group = groupRows[0];
   if (!group) return res.status(404).json({ error: 'Group not found' });
   if (group.created_by === userId) return res.status(400).json({ error: 'The host cannot leave the group. Delete it instead.' });
 
-  const member = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(groupId, userId);
-  if (!member) return res.status(404).json({ error: 'You are not a member of this group' });
+  const { rows: memberRows } = await query<{ id: string }>('SELECT 1 as id FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
+  if (memberRows.length === 0) return res.status(404).json({ error: 'You are not a member of this group' });
 
-  db.prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?').run(groupId, userId);
+  await query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
   res.json({ ok: true });
 });
 
 // Remove member from group (host only)
-groupsRouter.delete('/:groupId/members/:memberId', requireAuth, (req, res) => {
+groupsRouter.delete('/:groupId/members/:memberId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId, memberId } = req.params;
 
-  const group = db.prepare('SELECT created_by FROM groups WHERE id = ?').get(groupId) as { created_by: string } | undefined;
+  const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
+  const group = groupRows[0];
   if (!group) return res.status(404).json({ error: 'Group not found' });
   if (group.created_by !== userId) return res.status(403).json({ error: 'Only the host can remove members' });
   if (memberId === userId) return res.status(400).json({ error: 'You cannot remove yourself. Delete the group instead.' });
 
-  const member = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(groupId, memberId);
-  if (!member) return res.status(404).json({ error: 'Member not found in this group' });
+  const { rows: memberRows } = await query<{ id: string }>('SELECT 1 as id FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, memberId]);
+  if (memberRows.length === 0) return res.status(404).json({ error: 'Member not found in this group' });
 
-  db.prepare('DELETE FROM group_members WHERE group_id = ? AND user_id = ?').run(groupId, memberId);
+  await query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, memberId]);
   res.json({ ok: true });
 });
 
 // Create transaction (on receipt upload or manual total entry)
-groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, (req, res) => {
+groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
   const { splitMode } = req.body;
@@ -318,22 +384,25 @@ groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, (req
     return res.status(400).json({ error: 'splitMode must be EVEN_SPLIT or FULL_CONTROL' });
   }
 
-  const memberCheck = db.prepare('SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ?').get(groupId, userId);
-  if (!memberCheck) return res.status(404).json({ error: 'Group not found' });
+  const { rows: memberRows } = await query<{ id: string }>('SELECT 1 as id FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
+  if (memberRows.length === 0) return res.status(404).json({ error: 'Group not found' });
 
-  const group = db.prepare('SELECT created_by FROM groups WHERE id = ?').get(groupId) as { created_by: string } | undefined;
+  const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
+  const group = groupRows[0];
   if (!group || group.created_by !== userId) {
     return res.status(403).json({ error: 'Only the group creator can start a payment' });
   }
 
   const id = genId();
   const deadline = addMinutes(new Date(), 15);
-  db.prepare(`
-    INSERT INTO transactions (id, group_id, created_by, status, split_mode, allocation_deadline_at)
-    VALUES (?, ?, ?, 'PENDING_ALLOCATION', ?, ?)
-  `).run(id, groupId, userId, splitMode, deadline);
+  await query(
+    `INSERT INTO transactions (id, group_id, created_by, status, split_mode, allocation_deadline_at)
+     VALUES ($1, $2, $3, 'PENDING_ALLOCATION', $4, $5)`,
+    [id, groupId, userId, splitMode, deadline]
+  );
 
-  const row = db.prepare('SELECT * FROM transactions WHERE id = ?').get(id) as any;
+  const { rows } = await query('SELECT * FROM transactions WHERE id = $1', [id]);
+  const row = rows[0] as any;
   res.status(201).json({
     id: row.id,
     group_id: row.group_id,

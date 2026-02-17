@@ -96,6 +96,13 @@ async function request<T>(
 }
 
 export const api = {
+  /** Single call for initial load: user + groups + virtualCards. Use after login or on app init. */
+  bootstrap: () =>
+    request<{
+      user: { id: string; email: string; name: string; phone?: string; bank_linked: boolean; paymentMethods: unknown[] };
+      groups: { id: string; name: string; memberCount: number; cardLastFour: string | null }[];
+      virtualCards: { groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[];
+    }>('/bootstrap'),
   auth: {
     signup: (email: string, password: string, name: string) =>
       request<{ accessToken: string; user: { id: string; email: string; name: string } }>('/auth/signup', {
@@ -110,6 +117,12 @@ export const api = {
         skipAuth: true,
       }),
     logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+    verifyOtp: (phone: string, code: string, name?: string) =>
+      request<{ accessToken: string; user: { id: string; email: string; name: string; phone?: string } }>('/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone, code, name }),
+        skipAuth: true,
+      }),
   },
   users: {
     me: () => request<{ id: string; email: string; name: string; phone?: string; bank_linked: boolean; paymentMethods: unknown[] }>('/users/me'),

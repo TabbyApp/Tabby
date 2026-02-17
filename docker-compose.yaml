@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tabby
+      POSTGRES_PASSWORD: tabby
+      POSTGRES_DB: tabby
+    ports:
+      - "5433:5432"
+    volumes:
+      - tabby_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tabby -d tabby"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgresql://tabby:tabby@db:5432/tabby
+      PORT: "3001"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  tabby_pg:
