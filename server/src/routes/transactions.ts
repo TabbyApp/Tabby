@@ -365,7 +365,7 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
     amount: a.amount,
     name: nameMap.get(a.user_id) ?? 'Unknown',
   }));
-  res.json({ ok: true, allocations: withNames, status: 'SETTLED' });
+  res.json({ ok: true, allocations: withNames, status: 'FINALIZED' });
 });
 
 // Run fallback for a single expired transaction (used by timer job and route)
