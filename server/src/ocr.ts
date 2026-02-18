@@ -62,6 +62,9 @@ function mapLineItems(lineItems: LineItem[] | undefined): { name: string; price:
 
 export async function extractReceiptItems(imagePath: string): Promise<{ name: string; price: number }[]> {
   const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error('Receipt scanning is not configured. Use "Manual Entry" to add items by hand.');
+  }
 
   const buffer = fs.readFileSync(imagePath);
   const ext = path.extname(imagePath).toLowerCase();

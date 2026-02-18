@@ -17,12 +17,21 @@ function generateCardNumber(): string {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
+function generateSupportCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
 // List user's groups with virtual card info
 groupsRouter.get('/', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
 
-  const { rows: groups } = await query<{ id: string; name: string; created_by: string; created_at: string; card_number_last_four: string | null; member_count: string }>(`
-    SELECT g.id, g.name, g.created_by, g.created_at,
+  const { rows: groups } = await query<{ id: string; name: string; created_by: string; created_at: string; card_number_last_four: string | null; member_count: string; support_code: string | null; last_settled_at: string | null }>(`
+    SELECT g.id, g.name, g.created_by, g.created_at, g.support_code, g.last_settled_at,
            vc.card_number_last_four,
            (SELECT COUNT(*)::text FROM group_members WHERE group_id = g.id) as member_count
     FROM groups g
@@ -38,7 +47,17 @@ groupsRouter.get('/', requireAuth, async (req, res) => {
     memberCount: parseInt(g.member_count, 10),
     cardLastFour: g.card_number_last_four,
     createdAt: g.created_at,
+    supportCode: g.support_code,
+    lastSettledAt: g.last_settled_at,
   })));
+});
+
+// Public: preview join link (no auth) - returns group name for /join/:token
+groupsRouter.get('/join-preview/:token', async (req, res) => {
+  const { token } = req.params;
+  const { rows } = await query<{ name: string }>('SELECT name FROM groups WHERE invite_token = $1', [token]);
+  if (rows.length === 0) return res.status(404).json({ error: 'Invalid invite link' });
+  res.json({ groupName: rows[0].name });
 });
 
 // IMPORTANT: specific routes must come before /:groupId
@@ -81,12 +100,14 @@ groupsRouter.get('/batch', requireAuth, async (req, res) => {
     id: string; name: string; created_by: string;
     members: { id: string; name: string; email: string }[];
     cardLastFour: string | null; inviteToken: string;
+    supportCode: string | null; lastSettledAt: string | null;
+    lastSettledAllocations?: { user_id: string; name: string; amount: number }[];
     receipts: { id: string; group_id: string; status: string; total: number | null; created_at: string; splits?: unknown[] }[];
   };
 
-  // 1) Get groups user is member of, with invite_token and card
-  const { rows: groupRows } = await query<{ id: string; name: string; created_by: string; invite_token: string | null; card_number_last_four: string | null }>(`
-    SELECT g.id, g.name, g.created_by, g.invite_token, vc.card_number_last_four
+  // 1) Get groups user is member of, with invite_token, card, support_code, last_settled_at
+  const { rows: groupRows } = await query<{ id: string; name: string; created_by: string; invite_token: string | null; card_number_last_four: string | null; support_code: string | null; last_settled_at: string | null }>(`
+    SELECT g.id, g.name, g.created_by, g.invite_token, g.support_code, g.last_settled_at, vc.card_number_last_four
     FROM groups g
     JOIN group_members gm ON g.id = gm.group_id
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
@@ -182,6 +203,28 @@ groupsRouter.get('/batch', requireAuth, async (req, res) => {
     receiptsByGroup.set(r.group_id, list);
   }
 
+  // For groups with last_settled_at, fetch allocations for the latest settled transaction
+  const settledGroupIds = groupRows.filter((g) => g.last_settled_at).map((g) => g.id);
+  const allocsByGroup = new Map<string, { user_id: string; name: string; amount: number }[]>();
+  if (settledGroupIds.length > 0) {
+    const { rows: allocRows } = await query<{ group_id: string; user_id: string; amount: number; name: string }>(`
+      WITH latest_tx AS (
+        SELECT DISTINCT ON (group_id) id, group_id FROM transactions
+        WHERE group_id = ANY($1::text[]) AND status = 'SETTLED'
+        ORDER BY group_id, settled_at DESC
+      )
+      SELECT lt.group_id, ta.user_id, ta.amount, u.name
+      FROM latest_tx lt
+      JOIN transaction_allocations ta ON ta.transaction_id = lt.id
+      JOIN users u ON u.id = ta.user_id
+    `, [settledGroupIds]);
+    for (const a of allocRows) {
+      const list = allocsByGroup.get(a.group_id) ?? [];
+      list.push({ user_id: a.user_id, name: a.name, amount: a.amount });
+      allocsByGroup.set(a.group_id, list);
+    }
+  }
+
   const out: Record<string, BatchGroup> = {};
   for (const g of groupRows) {
     const group = groupMap.get(g.id)!;
@@ -200,11 +243,23 @@ groupsRouter.get('/batch', requireAuth, async (req, res) => {
       members,
       cardLastFour: group.card_number_last_four,
       inviteToken: group.invite_token!,
+      supportCode: (group as { support_code?: string }).support_code ?? null,
+      lastSettledAt: (group as { last_settled_at?: string }).last_settled_at ?? null,
       receipts: receiptsWithSplits,
+      lastSettledAllocations: allocsByGroup.get(g.id),
     };
   }
 
   res.json(out);
+});
+
+// Preview group by join token (public - no auth, for AcceptInvitePage)
+groupsRouter.get('/join/:token', async (req, res) => {
+  const { token } = req.params;
+  const { rows } = await query<{ name: string }>('SELECT g.name FROM groups g WHERE g.invite_token = $1', [token]);
+  const group = rows[0];
+  if (!group) return res.status(404).json({ error: 'Invalid invite link' });
+  res.json({ groupName: group.name });
 });
 
 // Create group and unique virtual card
@@ -220,9 +275,16 @@ groupsRouter.post('/', requireAuth, requireBankLinked, async (req, res) => {
   const cardId = genId();
   const cardLastFour = generateCardNumber();
   const inviteToken = crypto.randomBytes(12).toString('hex');
+  let supportCode = generateSupportCode();
+  let attempts = 0;
+  while (attempts++ < 10) {
+    const { rowCount } = await query('SELECT 1 FROM groups WHERE support_code = $1', [supportCode]);
+    if (!rowCount || rowCount === 0) break;
+    supportCode = generateSupportCode();
+  }
 
   await withTransaction(async (client) => {
-    await client.query('INSERT INTO groups (id, name, created_by, invite_token) VALUES ($1, $2, $3, $4)', [groupId, name.trim(), userId, inviteToken]);
+    await client.query('INSERT INTO groups (id, name, created_by, invite_token, support_code) VALUES ($1, $2, $3, $4, $5)', [groupId, name.trim(), userId, inviteToken, supportCode]);
     await client.query('INSERT INTO group_members (group_id, user_id) VALUES ($1, $2)', [groupId, userId]);
     await client.query('INSERT INTO virtual_cards (id, group_id, card_number_last_four) VALUES ($1, $2, $3)', [cardId, groupId, cardLastFour]);
 
@@ -259,8 +321,8 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
 
-  const { rows } = await query<{ id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number }>(`
-    SELECT g.id, g.name, g.created_by, g.created_at, g.invite_token,
+  const { rows } = await query<{ id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number; support_code: string | null; last_settled_at: string | null }>(`
+    SELECT g.id, g.name, g.created_by, g.created_at, g.invite_token, g.support_code, g.last_settled_at,
            vc.card_number_last_four,
            (SELECT COUNT(*)::int FROM group_members WHERE group_id = g.id AND user_id = $1) as is_member
     FROM groups g
@@ -283,14 +345,31 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
     }
   }
 
-  const { rows: members } = await query<{ id: string; name: string; email: string }>(
-    'SELECT u.id, u.name, u.email FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = $1',
+  const { rows: members } = await query<{ id: string; name: string; email: string; avatar_url: string | null }>(
+    'SELECT u.id, u.name, u.email, u.avatar_url FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = $1',
     [groupId]
   );
 
+  let lastSettledAllocations: { user_id: string; name: string; amount: number }[] = [];
+  if (row.last_settled_at) {
+    const { rows: allocs } = await query<{ user_id: string; amount: number }>(
+      'SELECT ta.user_id, ta.amount FROM transaction_allocations ta WHERE ta.transaction_id = (SELECT id FROM transactions WHERE group_id = $1 AND status = $2 ORDER BY settled_at DESC LIMIT 1)',
+      [groupId, 'SETTLED']
+    );
+    if (allocs.length > 0) {
+      const userIds = allocs.map((a) => a.user_id);
+      const { rows: nameRows } = await query<{ id: string; name: string }>('SELECT id, name FROM users WHERE id = ANY($1)', [userIds]);
+      const nameMap = Object.fromEntries(nameRows.map((n) => [n.id, n.name]));
+      lastSettledAllocations = allocs.map((a) => ({ user_id: a.user_id, name: nameMap[a.user_id] ?? 'Unknown', amount: a.amount }));
+    }
+  }
+
   res.json({
     id: row.id, name: row.name, created_by: row.created_by, created_at: row.created_at,
-    members, cardLastFour: row.card_number_last_four, inviteToken,
+    members: members.map((m) => ({ ...m, avatarUrl: m.avatar_url })),
+    cardLastFour: row.card_number_last_four, inviteToken,
+    supportCode: row.support_code, lastSettledAt: row.last_settled_at,
+    lastSettledAllocations: lastSettledAllocations.length > 0 ? lastSettledAllocations : undefined,
   });
 });
 

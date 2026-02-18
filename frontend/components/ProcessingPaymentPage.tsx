@@ -10,6 +10,7 @@ interface ProcessingPaymentPageProps {
   groupId: string | null;
   accountType: 'standard' | 'pro';
   transactionId?: string | null;
+  onSettlementComplete?: () => void;
   receiptData: {
     members: Array<{ id: number; name: string; amount: number; avatar: string }>;
     total: number;
@@ -17,7 +18,7 @@ interface ProcessingPaymentPageProps {
   itemSplitData?: { hasSelectedItems: boolean; yourItemsTotal: number };
 }
 
-export function ProcessingPaymentPage({ onNavigate, theme, groupId, accountType, transactionId, receiptData }: ProcessingPaymentPageProps) {
+export function ProcessingPaymentPage({ onNavigate, theme, groupId, accountType, transactionId, receiptData, onSettlementComplete }: ProcessingPaymentPageProps) {
   const isDark = theme === 'dark';
   const [step, setStep] = useState<'processing' | 'success'>('processing');
 
@@ -27,6 +28,7 @@ export function ProcessingPaymentPage({ onNavigate, theme, groupId, accountType,
       if (transactionId) {
         try {
           await api.transactions.settle(transactionId);
+          onSettlementComplete?.();
         } catch {
           // Transaction may already be settled by finalize
         }
@@ -47,7 +49,7 @@ export function ProcessingPaymentPage({ onNavigate, theme, groupId, accountType,
       clearTimeout(timer);
       clearTimeout(redirectTimer);
     };
-  }, [onNavigate, transactionId]);
+  }, [onNavigate, transactionId, onSettlementComplete]);
 
   const members = receiptData?.members || [
     { id: 1, name: 'You', amount: 0, avatar: '👤' },

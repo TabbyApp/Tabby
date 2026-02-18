@@ -42,6 +42,22 @@ function genId() {
   return crypto.randomUUID();
 }
 
+/** Create empty receipt for manual entry (no image) */
+receiptsRouter.post('/', requireAuth, async (req, res) => {
+  const { userId } = (req as any).user;
+  const { groupId } = req.body;
+  if (!groupId) return res.status(400).json({ error: 'groupId is required' });
+  const { rows: memberRows } = await query('SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
+  if (memberRows.length === 0) return res.status(404).json({ error: 'Group not found' });
+  const id = genId();
+  await query(
+    'INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status) VALUES ($1, $2, $3, $4, $5, $6)',
+    [id, groupId, userId, null, null, 'pending']
+  );
+  const { rows } = await query('SELECT * FROM receipts WHERE id = $1', [id]);
+  res.status(201).json(rows[0]);
+});
+
 receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, res) => {
   try {
     const { userId } = (req as any).user;

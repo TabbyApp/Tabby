@@ -19,6 +19,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/migrations ./migrations
+RUN chmod +x scripts/entrypoint.sh
 EXPOSE 3001
-CMD ["node", "dist/index.js"]
+ENTRYPOINT ["./scripts/entrypoint.sh"]
     

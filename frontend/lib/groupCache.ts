@@ -9,6 +9,10 @@ export interface CachedGroupDetail {
   createdBy: string;
   inviteToken: string | null;
   receipts: any[];
+  lastSettledAt?: string | null;
+  lastSettledAllocations?: { user_id: string; name: string; amount: number }[];
+  supportCode?: string | null;
+  cardLastFour?: string | null;
   timestamp: number;
 }
 
@@ -44,11 +48,16 @@ export async function prefetchGroupDetail(groupId: string): Promise<void> {
       api.receipts.list(groupId).catch(() => []),
     ]);
     if (groupData) {
+      const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; supportCode?: string | null; cardLastFour?: string | null };
       setCachedGroupDetail(groupId, {
         members: groupData.members,
         createdBy: groupData.created_by,
         inviteToken: groupData.inviteToken,
         receipts,
+        lastSettledAt: g.lastSettledAt ?? null,
+        lastSettledAllocations: g.lastSettledAllocations,
+        supportCode: g.supportCode ?? null,
+        cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
       });
     }
   } catch {
@@ -64,11 +73,16 @@ export async function prefetchAllGroupDetails(groupIds: string[]): Promise<void>
   try {
     const batch = await api.groups.getBatch(toFetch);
     for (const [id, data] of Object.entries(batch)) {
+      const d = data as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; supportCode?: string | null; cardLastFour?: string | null };
       setCachedGroupDetail(id, {
         members: data.members,
         createdBy: data.created_by,
         inviteToken: data.inviteToken,
         receipts: data.receipts ?? [],
+        lastSettledAt: d.lastSettledAt ?? null,
+        lastSettledAllocations: d.lastSettledAllocations,
+        supportCode: d.supportCode ?? null,
+        cardLastFour: data.cardLastFour ?? d.cardLastFour ?? null,
       });
     }
   } catch {

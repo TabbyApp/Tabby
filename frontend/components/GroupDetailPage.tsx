@@ -1,11 +1,11 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronLeft, Users, Receipt, Trash2, UserMinus, LogOut, Plus, MoreVertical, UserPlus, DollarSign, Check, Copy, Link2 } from 'lucide-react';
+import { ChevronLeft, Users, Receipt, Trash2, UserMinus, LogOut, Plus, MoreVertical, UserPlus, DollarSign, Check, Copy, Link2, CreditCard } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { PageType } from '../App';
 import { BottomNavigation } from './BottomNavigation';
 import { ProfileSheet } from './ProfileSheet';
 import { useAuth } from '../contexts/AuthContext';
-import { api } from '../lib/api';
+import { api, assetUrl } from '../lib/api';
 import { getCachedGroupDetail, setCachedGroupDetail, invalidateGroupCache } from '../lib/groupCache';
 
 interface GroupDetailPageProps {
@@ -33,7 +33,7 @@ const AVATAR_COLORS = [
 ];
 
 export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGroup, leaveGroup, currentUserId, itemSplitData, setItemSplitData, receiptData, onStartProcessing, onGroupsChanged }: GroupDetailPageProps) {
-  const { user } = useAuth();
+  const { user, virtualCards } = useAuth();
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
@@ -66,7 +66,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   // Use shared prefetch cache - data may already be available from App.tsx prefetch
   const cached = groupId ? getCachedGroupDetail(groupId) : null;
 
-  const [realMembers, setRealMembers] = useState<{ id: string; name: string; email: string }[]>(
+  const [realMembers, setRealMembers] = useState<{ id: string; name: string; email: string; avatarUrl?: string }[]>(
     cached?.members ?? []
   );
   const [realCreatedBy, setRealCreatedBy] = useState<string>(
@@ -78,6 +78,10 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const [inviteToken, setInviteToken] = useState<string | null>(
     cached?.inviteToken ?? null
   );
+  const [lastSettledAt, setLastSettledAt] = useState<string | null>(null);
+  const [lastSettledAllocations, setLastSettledAllocations] = useState<{ user_id: string; name: string; amount: number }[]>([]);
+  const [supportCode, setSupportCode] = useState<string | null>(null);
+  const [cardLastFour, setCardLastFour] = useState<string | null>(null);
 
   // Track which groupId we've loaded for, to avoid double-fetching
   const loadedGroupRef = useRef<string | null>(null);
@@ -94,6 +98,10 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       setRealCreatedBy(freshCache.createdBy);
       setInviteToken(freshCache.inviteToken);
       setRealReceipts(freshCache.receipts);
+      setLastSettledAt(freshCache.lastSettledAt ?? null);
+      setLastSettledAllocations(freshCache.lastSettledAllocations ?? []);
+      setSupportCode(freshCache.supportCode ?? null);
+      setCardLastFour(freshCache.cardLastFour ?? null);
       const latestCached = freshCache.receipts.find((r: any) => r.total != null);
       if (latestCached?.total) {
         setReceiptTotal(latestCached.total);
@@ -114,6 +122,10 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setRealMembers(groupData.members);
         setRealCreatedBy(groupData.created_by);
         setInviteToken(groupData.inviteToken);
+        setLastSettledAt((groupData as { lastSettledAt?: string | null }).lastSettledAt ?? null);
+        setLastSettledAllocations((groupData as { lastSettledAllocations?: { user_id: string; name: string; amount: number }[] }).lastSettledAllocations ?? []);
+        setSupportCode((groupData as { supportCode?: string | null }).supportCode ?? null);
+        setCardLastFour(groupData.cardLastFour ?? null);
       }
       const receipts = receiptsData ?? [];
       setRealReceipts(receipts);
@@ -124,17 +136,25 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       }
       // Store in shared cache
       if (groupData) {
+        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; supportCode?: string | null; cardLastFour?: string | null };
         setCachedGroupDetail(groupId, {
           members: groupData.members,
           createdBy: groupData.created_by,
           inviteToken: groupData.inviteToken,
           receipts,
+          lastSettledAt: g.lastSettledAt ?? null,
+          lastSettledAllocations: g.lastSettledAllocations,
+          supportCode: g.supportCode ?? null,
+          cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
         });
       }
     });
   }, [groupId]);
 
   const isCreator = realCreatedBy ? realCreatedBy === user?.id : currentGroup?.createdBy === currentUserId;
+
+  // Post-purchase view-only: when transaction was settled, show confirmation (no add receipt)
+  const isViewOnly = !!lastSettledAt;
 
   // Build member avatars from real data
   const memberAvatars = realMembers.length > 0
@@ -147,9 +167,10 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           initials,
           color: AVATAR_COLORS[i % AVATAR_COLORS.length],
           _realId: m.id,
+          avatarUrl: m.avatarUrl ?? (isMe ? (user as { avatarUrl?: string })?.avatarUrl : undefined),
         };
       })
-    : [{ id: 1, name: 'You', initials: 'ME', color: AVATAR_COLORS[0], _realId: user?.id ?? '' }];
+    : [{ id: 1, name: 'You', initials: 'ME', color: AVATAR_COLORS[0], _realId: user?.id ?? '', avatarUrl: (user as { avatarUrl?: string })?.avatarUrl }];
 
   const visibleAvatars = memberAvatars.slice(0, 3);
   const remainingCount = Math.max(0, memberAvatars.length - 3);
@@ -353,7 +374,41 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           )}
         </div>
 
-        {/* Split Mode Toggle */}
+        {/* Support code for support tickets */}
+        {supportCode && (
+          <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-2`}>
+            Support ID: <span className="font-mono font-semibold">{supportCode}</span>
+          </p>
+        )}
+
+        {/* Virtual card - links to card details */}
+        {(cardLastFour || virtualCards.some(c => c.groupId === groupId)) && (
+          <button
+            onClick={() => onNavigate('cardDetails', groupId ?? undefined)}
+            className={`w-full mt-3 rounded-2xl p-4 flex items-center justify-between ${isDark ? 'bg-slate-700/80' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} active:scale-[0.99] transition-transform`}
+          >
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isDark ? 'bg-slate-600' : 'bg-white/80'}`}>
+                <CreditCard size={24} className={isDark ? 'text-white' : 'text-purple-600'} />
+              </div>
+              <div className="text-left">
+                <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Virtual Group Card</p>
+                <p className={`text-xs font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  •••• •••• •••• {cardLastFour ?? virtualCards.find(c => c.groupId === groupId)?.cardLastFour ?? '----'}
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Balance</p>
+              <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                ${(virtualCards.find(c => c.groupId === groupId)?.groupTotal ?? 0).toFixed(2)}
+              </p>
+            </div>
+          </button>
+        )}
+
+        {/* Split Mode Toggle - hidden when view-only (post-purchase) */}
+        {!isViewOnly && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -381,10 +436,39 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             Item Split
           </button>
         </motion.div>
+        )}
       </motion.div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-5 py-5">
+        {/* Post-purchase confirmation (view-only) */}
+        {isViewOnly && (
+          <motion.div
+            initial={{ y: 8, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-6 shadow-lg border mb-5`}
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                <Check size={24} className="text-green-600" />
+              </div>
+              <div>
+                <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Payment Complete</h3>
+                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Everyone has been charged</p>
+              </div>
+            </div>
+            <h4 className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'} mb-3`}>What each person paid</h4>
+            <div className="space-y-3">
+              {lastSettledAllocations.map((a) => (
+                <div key={a.user_id} className="flex justify-between items-center">
+                  <span className={isDark ? 'text-white' : 'text-slate-800'}>{a.name}</span>
+                  <span className="font-bold text-green-600">${a.amount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
         {/* Members with Invite Button */}
         <motion.div
           initial={{ y: 10, opacity: 0 }}
@@ -400,10 +484,14 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 {visibleAvatars.map((avatar, index) => (
                   <div
                     key={avatar.id}
-                    className={`w-10 h-10 rounded-full bg-gradient-to-br ${avatar.color} flex items-center justify-center text-white text-xs font-bold shadow-lg border-2 ${isDark ? 'border-slate-800' : 'border-white'}`}
+                    className={`w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br ${avatar.color} flex items-center justify-center text-white text-xs font-bold shadow-lg border-2 ${isDark ? 'border-slate-800' : 'border-white'}`}
                     style={{ marginLeft: index > 0 ? '-12px' : '0', zIndex: visibleAvatars.length - index }}
                   >
-                    {avatar.initials}
+                    {avatar.avatarUrl ? (
+                      <img src={assetUrl(avatar.avatarUrl)} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      avatar.initials
+                    )}
                   </div>
                 ))}
                 {remainingCount > 0 && (
@@ -424,6 +512,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 </p>
               </div>
             </button>
+            {!isViewOnly && (
             <button 
               onClick={() => setShowInviteSheet(true)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm shadow-lg shadow-purple-500/30 active:scale-95 transition-transform"
@@ -431,6 +520,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
               <UserPlus size={16} strokeWidth={2.5} />
               Invite
             </button>
+            )}
           </div>
 
           {/* Members Dropdown */}
@@ -463,9 +553,13 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                           className={`flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-gray-50'} transition-colors border-b ${isDark ? 'border-slate-700/50' : 'border-gray-100'} last:border-0`}
                         >
                           <div
-                            className={`w-10 h-10 rounded-full bg-gradient-to-br ${member.color} flex items-center justify-center text-white text-xs font-bold shadow-md`}
+                            className={`w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br ${member.color} flex items-center justify-center text-white text-xs font-bold shadow-md`}
                           >
-                            {member.initials}
+                            {member.avatarUrl ? (
+                              <img src={assetUrl(member.avatarUrl)} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              member.initials
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'} text-sm truncate`}>
@@ -500,7 +594,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           </AnimatePresence>
         </motion.div>
 
-        {/* Split Evenly Mode */}
+        {/* Split Evenly Mode - hidden when view-only */}
+        {!isViewOnly && (
         <AnimatePresence mode="wait">
           {splitMode === 'even' && (
             <motion.div
@@ -781,6 +876,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             </motion.div>
           )}
         </AnimatePresence>
+        )}
 
         {/* Transaction History */}
         {baseGroup.transactions.length > 0 && (

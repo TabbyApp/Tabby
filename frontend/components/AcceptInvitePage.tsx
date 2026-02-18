@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { Users, Check, X, AlertCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PageType } from '../App';
 import { api } from '../lib/api';
 
@@ -8,20 +8,26 @@ interface AcceptInvitePageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
   inviteCode?: string;
+  onAccepted?: () => void;
 }
 
-export function AcceptInvitePage({ onNavigate, theme, inviteCode }: AcceptInvitePageProps) {
+export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted }: AcceptInvitePageProps) {
   const isDark = theme === 'dark';
   const [isAccepting, setIsAccepting] = useState(false);
   const [isDeclining, setIsDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [groupName, setGroupName] = useState<string>('Group Invitation');
+
+  useEffect(() => {
+    if (!inviteCode) return;
+    api.groups
+      .joinPreview(inviteCode)
+      .then((r) => setGroupName(r.groupName))
+      .catch(() => setGroupName('Unknown Group'));
+  }, [inviteCode]);
 
   const invite = {
-    groupName: 'Group Invitation',
-    inviterName: 'A friend',
-    inviterAvatar: '👩',
-    members: 0,
-    recentActivity: '',
+    groupName,
     color: '#F97316',
   };
 
@@ -34,6 +40,7 @@ export function AcceptInvitePage({ onNavigate, theme, inviteCode }: AcceptInvite
     setError(null);
     try {
       const result = await api.groups.joinByToken(inviteCode);
+      onAccepted?.();
       onNavigate('groupDetail', result.groupId);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to join group');
@@ -44,11 +51,26 @@ export function AcceptInvitePage({ onNavigate, theme, inviteCode }: AcceptInvite
 
   const handleDecline = () => {
     setIsDeclining(true);
+    onAccepted?.();
     setTimeout(() => {
       setIsDeclining(false);
       onNavigate('home');
     }, 500);
   };
+
+  if (!inviteCode) {
+    return (
+      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center px-5 ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+        <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>Invalid or expired invite link.</p>
+        <button
+          onClick={() => onNavigate('home')}
+          className="mt-4 text-purple-600 font-semibold"
+        >
+          Go Home
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>

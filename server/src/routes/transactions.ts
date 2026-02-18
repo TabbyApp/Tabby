@@ -387,6 +387,8 @@ export async function runFallbackForTransaction(id: string): Promise<boolean> {
 
   const now = new Date().toISOString();
   await query('UPDATE transactions SET status = $1, tip_amount = 0, total = $2, finalized_at = $3, settled_at = $4, archived_at = $5 WHERE id = $6', ['SETTLED', total, now, now, now, id]);
+  const { rows: txRow } = await query<{ group_id: string }>('SELECT group_id FROM transactions WHERE id = $1', [id]);
+  if (txRow[0]) await query('UPDATE groups SET last_settled_at = $1 WHERE id = $2', [now, txRow[0].group_id]);
   await query('DELETE FROM transaction_allocations WHERE transaction_id = $1', [id]);
   for (const a of allocations) {
     if (a.amount > 0) {
@@ -418,6 +420,7 @@ transactionsRouter.post('/:id/settle', requireAuth, async (req, res) => {
 
   const now = new Date().toISOString();
   await query('UPDATE transactions SET status = $1, settled_at = $2, archived_at = $3 WHERE id = $4', ['SETTLED', now, now, id]);
+  await query('UPDATE groups SET last_settled_at = $1 WHERE id = $2', [now, tx.group_id]);
 
   const { rows: allocs } = await query<{ user_id: string; amount: number; name: string }>(`
     SELECT ta.user_id, ta.amount, u.name

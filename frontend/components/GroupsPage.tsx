@@ -9,7 +9,7 @@ interface GroupsPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
   groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
-  recentGroups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string; deletedAt: Date }>;
+  recentGroups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string; deletedAt?: Date }>;
   accountType: 'standard' | 'pro';
   deleteGroup: (groupId: string) => void;
   leaveGroup: (groupId: string) => void;
@@ -105,7 +105,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
               {displayGroups.map((group, index) => (
                 <motion.button
                   key={group.id}
-                  onClick={() => activeTab === 'active' ? onNavigate('groupDetail', group.id) : undefined}
+                  onClick={() => onNavigate('groupDetail', group.id)}
                   initial={{ x: -8, opacity: 0 }}
                   animate={{ x: 0, opacity: 1 }}
                   transition={{ delay: index * 0.03, duration: 0.15 }}
@@ -126,10 +126,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
                     <div className="flex-1 text-left">
                       <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-[18px] mb-0.5`}>{group.name}</h3>
                       <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} font-medium`}>
-                        {activeTab === 'recent' && 'deletedAt' in group 
-                          ? `Deleted ${new Date((group as any).deletedAt).toLocaleDateString()}`
-                          : `${group.members} members`
-                        }
+                        {activeTab === 'recent' ? 'Settled · ' : ''}{group.members} members
                       </p>
                     </div>
                     <div className="text-right">

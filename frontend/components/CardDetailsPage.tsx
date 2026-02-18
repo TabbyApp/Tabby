@@ -1,33 +1,74 @@
 import { motion } from 'motion/react';
-import { ChevronLeft, CreditCard, ArrowUpRight, ArrowDownLeft, Users, Wallet } from 'lucide-react';
+import { ChevronLeft, CreditCard, Users } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { PageType } from '../App';
+import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 interface CardDetailsPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
+  groupId?: string;
 }
 
-export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
+export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageProps) {
   const isDark = theme === 'dark';
+  const { user, virtualCards } = useAuth();
+  const [groupData, setGroupData] = useState<{
+    name: string; cardLastFour: string; groupTotal: number;
+    members: { id: string; name: string }[];
+    allocations: { user_id: string; amount: number; name: string }[];
+  } | null>(null);
+  const [loading, setLoading] = useState(!!groupId);
 
-  const transactions = [
-    { id: 1, type: 'charge', description: 'Pizza Palace', amount: 15.50, date: '2h ago', user: 'You' },
-    { id: 2, type: 'payment', description: 'Sarah paid in', amount: 12.20, date: '3h ago', user: 'Sarah' },
-    { id: 3, type: 'charge', description: 'Coffee Shop', amount: 18.10, date: '1d ago', user: 'Mike' },
-  ];
+  const cardFromContext = groupId ? virtualCards.find(c => c.groupId === groupId) : null;
 
-  const groupMembers = [
-    { id: 1, name: 'You', balance: 15.50, avatar: '👤' },
-    { id: 2, name: 'Sarah', balance: -12.20, avatar: '👩' },
-    { id: 3, name: 'Mike', balance: 18.10, avatar: '👨' },
-    { id: 4, name: 'Emma', balance: 12.20, avatar: '👧' },
-  ];
+  useEffect(() => {
+    if (!groupId) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    Promise.all([
+      api.groups.get(groupId),
+      api.groups.getBatch([groupId]),
+    ]).then(([group, batch]) => {
+      const b = batch[groupId];
+      const receipts = b?.receipts ?? [];
+      const txIds = receipts.map((r: any) => r.transaction_id).filter(Boolean);
+      const total = cardFromContext?.groupTotal ?? 0;
+      setGroupData({
+        name: group.name,
+        cardLastFour: group.cardLastFour ?? '0000',
+        groupTotal: total,
+        members: group.members,
+        allocations: [],
+      });
+    }).catch(() => setGroupData(null)).finally(() => setLoading(false));
+  }, [groupId, cardFromContext?.groupTotal]);
 
   const addToAppleWallet = () => {
-    // Mock implementation for adding to Apple Wallet
     console.log('Adding card to Apple Wallet');
-    // In a real app, this would trigger the Apple Wallet API
   };
+
+  if (!groupId) {
+    return (
+      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center px-5 ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+        <p className={`mb-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>No card selected</p>
+        <button onClick={() => onNavigate('home')} className="text-purple-600 font-semibold">Back to Home</button>
+      </div>
+    );
+  }
+
+  if (loading || !groupData) {
+    return (
+      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+        <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>Loading...</p>
+      </div>
+    );
+  }
+
+  const { name, cardLastFour, groupTotal, members } = groupData;
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
@@ -60,7 +101,7 @@ export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
             <div className="flex items-start justify-between mb-8">
               <div>
                 <p className="text-purple-200 text-xs mb-1">Virtual Group Card</p>
-                <p className="text-white font-mono text-xl">4024 0071 9482 4829</p>
+                <p className="text-white font-mono text-xl">•••• •••• •••• {cardLastFour}</p>
               </div>
               <CreditCard size={24} className="text-white/80" />
             </div>
@@ -104,18 +145,18 @@ export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
           transition={{ duration: 0.12 }}
           className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-5 shadow-sm mb-6`}
         >
-          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-2`}>Total Balance</p>
-          <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-800'} mb-4`}>$45.80</p>
+          <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-2`}>Group Balance</p>
+          <p className={`text-3xl font-bold ${isDark ? 'text-white' : 'text-slate-800'} mb-4`}>${groupTotal.toFixed(2)}</p>
           <div className="flex items-center gap-2">
             <div className="flex -space-x-2">
-              {groupMembers.slice(0, 3).map((member) => (
-                <div key={member.id} className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 border-2 border-white flex items-center justify-center text-sm">
-                  {member.avatar}
+              {members.slice(0, 3).map((m) => (
+                <div key={m.id} className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 border-2 border-white flex items-center justify-center text-sm text-white font-medium">
+                  {m.name.charAt(0)}
                 </div>
               ))}
             </div>
             <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-              {groupMembers.length} members in group
+              {members.length} members in group
             </p>
           </div>
         </motion.div>
@@ -131,66 +172,35 @@ export function CardDetailsPage({ onNavigate, theme }: CardDetailsPageProps) {
             Group Members
           </h2>
           <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl overflow-hidden shadow-sm`}>
-            {groupMembers.map((member, index) => (
+            {members.map((m, index) => (
               <div 
-                key={member.id}
+                key={m.id}
                 className={`flex items-center justify-between p-4 ${
-                  index !== groupMembers.length - 1 ? `border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}` : ''
+                  index !== members.length - 1 ? `border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}` : ''
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-lg">
-                    {member.avatar}
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white font-medium">
+                    {m.name.charAt(0)}
                   </div>
-                  <p className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>{member.name}</p>
-                </div>
-                <p className={`font-semibold ${member.balance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {member.balance >= 0 ? '+' : ''}${member.balance.toFixed(2)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </motion.div>
-
-        {/* Transaction History */}
-        <motion.div
-          initial={{ y: 6, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.12 }}
-        >
-          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>
-            Recent Transactions
-          </h2>
-          <div className="space-y-3">
-            {transactions.map((transaction) => (
-              <div key={transaction.id} className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    transaction.type === 'charge' ? 'bg-red-100' : 'bg-green-100'
-                  }`}>
-                    {transaction.type === 'charge' ? (
-                      <ArrowUpRight size={20} className="text-red-500" />
-                    ) : (
-                      <ArrowDownLeft size={20} className="text-green-500" />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                      {transaction.description}
-                    </p>
-                    <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {transaction.user} • {transaction.date}
-                    </p>
-                  </div>
-                  <p className={`font-bold ${
-                    transaction.type === 'charge' ? 'text-red-500' : 'text-green-500'
-                  }`}>
-                    {transaction.type === 'charge' ? '-' : '+'}${transaction.amount.toFixed(2)}
+                  <p className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                    {m.id === user?.id ? 'You' : m.name}
                   </p>
                 </div>
               </div>
             ))}
           </div>
+        </motion.div>
+
+        {/* View group detail */}
+        <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }}>
+          <button
+            onClick={() => onNavigate('groupDetail', groupId)}
+            className={`w-full ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm flex items-center justify-between`}
+          >
+            <span className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'}`}>View Group Details</span>
+            <ChevronLeft size={20} className={`rotate-180 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
+          </button>
         </motion.div>
       </div>
     </div>

@@ -9,14 +9,14 @@ bootstrapRouter.get('/', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
 
   const [userRes, groupsRes, cardsRes] = await Promise.all([
-    query<{ id: string; email: string; name: string; phone: string; created_at: string; bank_linked: boolean; payment_methods_json: string | null }>(`
-      SELECT u.id, u.email, u.name, COALESCE(u.phone, '') as phone, u.created_at, COALESCE(u.bank_linked, false) as bank_linked,
+    query<{ id: string; email: string; name: string; phone: string; created_at: string; bank_linked: boolean; avatar_url: string | null; payment_methods_json: string | null }>(`
+      SELECT u.id, u.email, u.name, COALESCE(u.phone, '') as phone, u.created_at, COALESCE(u.bank_linked, false) as bank_linked, u.avatar_url,
              (SELECT json_agg(json_build_object('id', id, 'type', type, 'last_four', last_four, 'brand', brand, 'created_at', created_at))
               FROM payment_methods WHERE user_id = u.id)::text as payment_methods_json
       FROM users u WHERE u.id = $1
     `, [userId]),
-    query<{ id: string; name: string; created_by: string; created_at: string; card_number_last_four: string | null; member_count: string }>(`
-      SELECT g.id, g.name, g.created_by, g.created_at,
+    query<{ id: string; name: string; created_by: string; created_at: string; card_number_last_four: string | null; member_count: string; last_settled_at: string | null; support_code: string | null }>(`
+      SELECT g.id, g.name, g.created_by, g.created_at, g.last_settled_at, g.support_code,
              vc.card_number_last_four,
              (SELECT COUNT(*)::text FROM group_members WHERE group_id = g.id) as member_count
       FROM groups g
@@ -63,6 +63,8 @@ bootstrapRouter.get('/', requireAuth, async (req, res) => {
     memberCount: parseInt(g.member_count, 10),
     cardLastFour: g.card_number_last_four,
     createdAt: g.created_at,
+    lastSettledAt: g.last_settled_at,
+    supportCode: g.support_code,
   }));
 
   const virtualCards = cardsRes.rows.map((c) => ({
@@ -79,6 +81,7 @@ bootstrapRouter.get('/', requireAuth, async (req, res) => {
       phone: userRow.phone,
       created_at: userRow.created_at,
       bank_linked: !!userRow.bank_linked,
+      avatarUrl: userRow.avatar_url,
       paymentMethods: paymentMethods.filter((p) => p != null),
     },
     groups,

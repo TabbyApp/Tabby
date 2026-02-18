@@ -6,10 +6,11 @@ type User = {
   id: string; email: string; name: string;
   bank_linked?: boolean;
   phone?: string;
+  avatarUrl?: string | null;
   paymentMethods?: PaymentMethod[];
 } | null;
 
-export type BootstrapGroup = { id: string; name: string; memberCount: number; cardLastFour: string | null };
+export type BootstrapGroup = { id: string; name: string; memberCount: number; cardLastFour: string | null; lastSettledAt?: string | null };
 export type BootstrapVirtualCard = { groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number };
 
 type AuthContextValue = {
@@ -45,6 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       name: data.user.name,
       bank_linked: data.user.bank_linked,
       phone: data.user.phone ?? '',
+      avatarUrl: (data.user as { avatarUrl?: string }).avatarUrl ?? null,
       paymentMethods: pm as PaymentMethod[],
     });
     setGroups(data.groups);

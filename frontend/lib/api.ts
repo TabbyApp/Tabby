@@ -1,6 +1,18 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const TOKEN_KEY = 'tabby_access_token';
 
+/** Resolve server asset URL (e.g. /uploads/avatars/xxx) to full URL for img src */
+export function assetUrl(path: string | null | undefined): string {
+  if (!path || typeof path !== 'string') return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  try {
+    const base = typeof window !== 'undefined' ? window.location.origin : '';
+    return path.startsWith('/') ? `${base}${path}` : path;
+  } catch {
+    return path;
+  }
+}
+
 function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
@@ -117,6 +129,12 @@ export const api = {
         skipAuth: true,
       }),
     logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+    sendOtp: (phone: string) =>
+      request<{ ok: boolean }>('/auth/send-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone }),
+        skipAuth: true,
+      }),
     verifyOtp: (phone: string, code: string, name?: string) =>
       request<{ accessToken: string; user: { id: string; email: string; name: string; phone?: string } }>('/auth/verify-otp', {
         method: 'POST',
@@ -131,6 +149,25 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),
+    uploadAvatar: (file: File | Blob) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const token = getAccessToken();
+      return fetch(`${API_BASE}/users/me/avatar`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+        body: formData,
+      }).then(async (r) => {
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({})) as { error?: string; debug?: string };
+          const e = new Error(err.error || `Upload failed (${r.status})`) as Error & { debug?: string };
+          if (err.debug) e.debug = err.debug;
+          throw e;
+        }
+        return r.json() as Promise<{ avatarUrl: string }>;
+      });
+    },
     linkBank: () => request<{ ok: boolean; bank_linked: boolean }>('/users/link-bank', { method: 'POST' }),
     addPaymentMethod: (type: 'bank' | 'card', lastFour: string, brand?: string) =>
       request<{ id: string; type: string; last_four: string; brand: string | null }>(
@@ -147,7 +184,7 @@ export const api = {
         body: JSON.stringify({ name, memberEmails }),
       }),
     get: (groupId: string) =>
-      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string }[]; cardLastFour: string | null; inviteToken: string | null }>(
+      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; avatarUrl?: string }[]; cardLastFour: string | null; inviteToken: string | null; supportCode: string | null; lastSettledAt: string | null }>(
         `/groups/${groupId}`
       ),
     /** Batch fetch group details - 1 request instead of N (avoids connection queueing) */
@@ -160,6 +197,8 @@ export const api = {
       }>>(
         `/groups/batch?ids=${encodeURIComponent(groupIds.join(','))}`
       ),
+    joinPreview: (token: string) =>
+      request<{ groupName: string }>(`/groups/join/${token}`),
     joinByToken: (token: string) =>
       request<{ groupId: string; groupName: string; joined: boolean }>(`/groups/join/${token}`, { method: 'POST' }),
     deleteGroup: (groupId: string) =>
@@ -174,6 +213,11 @@ export const api = {
       ),
   },
   receipts: {
+    create: (groupId: string) =>
+      request<{ id: string }>('/receipts', {
+        method: 'POST',
+        body: JSON.stringify({ groupId }),
+      }),
     list: (groupId: string) =>
       request<
         {

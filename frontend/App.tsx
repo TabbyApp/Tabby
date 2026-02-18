@@ -41,6 +41,8 @@ export interface AppGroup {
   balance: number;
   color: string;
   createdBy: string;
+  lastSettledAt?: string | null;
+  supportCode?: string | null;
 }
 
 const GROUP_COLORS = ['#3B82F6', '#A855F7', '#22C55E', '#F97316', '#EC4899', '#14B8A6', '#F59E0B', '#6366F1'];
@@ -76,9 +78,11 @@ export default function App() {
   
   // Real groups from backend
   const [groups, setGroups] = useState<AppGroup[]>([]);
+  const [activeGroups, setActiveGroups] = useState<AppGroup[]>([]);
+  const [recentGroups, setRecentGroups] = useState<AppGroup[]>([]);
   
   // Preloaded virtual card info for LandingPage
-  const [cardInfo, setCardInfo] = useState<{ lastFour: string; balance: number } | null>(null);
+  const [cardInfo, setCardInfo] = useState<{ lastFour: string; balance: number; groupId?: string } | null>(null);
 
   // Notifications (UI-only for now - no backend endpoint)
   const [notifications, setNotifications] = useState<Array<{
@@ -87,8 +91,22 @@ export default function App() {
   const [pendingInvites, setPendingInvites] = useState<Array<{
     id: number; groupName: string; inviterName: string; members: number;
   }>>([]);
+  const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
 
   const unreadNotificationCount = notifications.filter(n => !n.read).length;
+
+  // Parse /join/:token from URL on load (invite links)
+  useEffect(() => {
+    const m = window.location.pathname.match(/^\/join\/([a-f0-9]+)$/i);
+    if (m?.[1]) {
+      setPendingInviteToken(m[1]);
+      window.history.replaceState({}, '', '/');
+    }
+  }, []);
+
+  const handlePostAuth = useCallback(() => {
+    // Auth completed; AuthContext already updated user state
+  }, []);
 
   // Fetch groups (uses bootstrap - single request)
   const loadGroups = useCallback(async () => {
@@ -109,6 +127,7 @@ export default function App() {
       setInitialDataLoaded(true);
       return;
     }
+    const FIFTEEN_MIN_MS = 15 * 60 * 1000;
     const mapped: AppGroup[] = bootstrapGroups.map((g, i) => ({
       id: g.id,
       name: g.name,
@@ -116,13 +135,29 @@ export default function App() {
       balance: 0,
       color: GROUP_COLORS[i % GROUP_COLORS.length],
       createdBy: '',
+      lastSettledAt: (g as { lastSettledAt?: string | null }).lastSettledAt ?? null,
+      supportCode: (g as { supportCode?: string | null }).supportCode ?? null
     }));
     setGroups(mapped);
+    // Split active vs recent: settled > 15 min ago → recent
+    const activeGroups = mapped.filter((g) => {
+      const ls = g.lastSettledAt;
+      if (!ls) return true;
+      return Date.now() - new Date(ls).getTime() < FIFTEEN_MIN_MS;
+    });
+    const recentGroupsList = mapped.filter((g) => {
+      const ls = g.lastSettledAt;
+      if (!ls) return false;
+      return Date.now() - new Date(ls).getTime() >= FIFTEEN_MIN_MS;
+    });
+    setActiveGroups(activeGroups);
+    setRecentGroups(recentGroupsList);
     if (bootstrapCards.length > 0) {
-      const totalBalance = bootstrapCards.reduce((sum, c) => sum + (c.groupTotal ?? 0), 0);
+      const firstActive = bootstrapCards.find(c => activeGroups.some(g => g.id === c.groupId)) ?? bootstrapCards[0];
       setCardInfo({
-        lastFour: bootstrapCards[0].cardLastFour ?? '0000',
-        balance: totalBalance,
+        lastFour: firstActive.cardLastFour ?? '0000',
+        balance: firstActive.groupTotal ?? 0,
+        groupId: firstActive.groupId,
       });
     } else {
       setCardInfo(null);
@@ -168,6 +203,8 @@ export default function App() {
       if (page === 'receiptScan') {
         setProcessingGroupId(groupId);
       }
+    } else if (page === 'cardDetails' && cardInfo?.groupId) {
+      setSelectedGroupId(cardInfo.groupId);
     }
   };
 
@@ -192,6 +229,13 @@ export default function App() {
   // Keep splash visible until: (1) animation is done AND (2) auth resolved AND (3) initial data loaded
   const showSplash = !splashAnimDone || authLoading || !initialDataLoaded;
 
+  // When logged in and we have a pending invite token, navigate to accept page
+  useEffect(() => {
+    if (isAuthenticated && pendingInviteToken && !showSplash && currentPage === 'home') {
+      setCurrentPage('acceptInvite');
+    }
+  }, [isAuthenticated, pendingInviteToken, currentPage, showSplash]);
+
   return (
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-black'}`}>
       <div className={`mx-auto max-w-[430px] h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-[#F2F2F7]'} relative overflow-hidden`}>
@@ -203,7 +247,7 @@ export default function App() {
         ) : showForgotPassword ? (
           <ForgotPasswordPage onNavigate={handleNavigate} onBack={() => setShowForgotPassword(false)} theme={theme} />
         ) : !isAuthenticated ? (
-          <LoginSignup onAuthenticate={() => {}} onForgotPassword={() => setShowForgotPassword(true)} />
+          <LoginSignup onAuthenticate={handlePostAuth} onForgotPassword={() => setShowForgotPassword(true)} />
         ) : (
           <AnimatePresence mode="wait">
             <motion.div
@@ -216,7 +260,7 @@ export default function App() {
             >
               {currentPage === 'home' && (
                 <LandingPage 
-                  onNavigate={handleNavigate} theme={theme} groups={groups} 
+                  onNavigate={handleNavigate} theme={theme} groups={activeGroups} recentGroups={recentGroups}
                   unreadNotificationCount={unreadNotificationCount}
                   pendingInvites={pendingInvites} acceptInvite={acceptInvite} declineInvite={declineInvite}
                   preloadedCardInfo={cardInfo}
@@ -224,8 +268,8 @@ export default function App() {
               )}
               {currentPage === 'groups' && (
                 <GroupsPage 
-                  onNavigate={handleNavigate} theme={theme} groups={groups}
-                  recentGroups={[]} accountType={accountType}
+                  onNavigate={handleNavigate} theme={theme} groups={activeGroups}
+                  recentGroups={recentGroups} accountType={accountType}
                   deleteGroup={deleteGroup} leaveGroup={leaveGroup} currentUserId={user?.id ?? ''}
                 />
               )}
@@ -233,12 +277,12 @@ export default function App() {
               {currentPage === 'account' && <AccountPage onNavigate={handleNavigate} theme={theme} />}
               {currentPage === 'settings' && <SettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} onLogout={handleLogout} />}
               {currentPage === 'wallet' && <VirtualWalletPage onNavigate={handleNavigate} theme={theme} />}
-              {currentPage === 'cardDetails' && <CardDetailsPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'cardDetails' && <CardDetailsPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId ?? undefined} />}
               {currentPage === 'createGroup' && <CreateGroupPage onNavigate={handleNavigate} theme={theme} onGroupCreated={loadGroups} />}
               {currentPage === 'receiptScan' && <ReceiptScanPage onNavigate={handleNavigate} theme={theme} realGroupId={processingGroupId} onReceiptUploaded={(id) => setLastReceiptId(id)} />}
               {currentPage === 'receiptItems' && <ReceiptItemsPage onNavigate={handleNavigate} theme={theme} setReceiptData={setReceiptData} setItemSplitData={setItemSplitData} receiptId={lastReceiptId} groupId={processingGroupId} />}
-              {currentPage === 'processing' && <ProcessingPaymentPage onNavigate={handleNavigate} theme={theme} groupId={processingGroupId} accountType={accountType} transactionId={currentTransactionId} receiptData={receiptData} itemSplitData={itemSplitData} />}
-              {currentPage === 'groupDetail' && <GroupDetailPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId} groups={groups} deleteGroup={deleteGroup} leaveGroup={leaveGroup} currentUserId={user?.id ?? ''} itemSplitData={itemSplitData} setItemSplitData={setItemSplitData} receiptData={receiptData} onStartProcessing={(txId) => { setCurrentTransactionId(txId); }} onGroupsChanged={loadGroups} />}
+              {currentPage === 'processing' && <ProcessingPaymentPage onNavigate={handleNavigate} theme={theme} groupId={processingGroupId} accountType={accountType} transactionId={currentTransactionId} receiptData={receiptData} itemSplitData={itemSplitData} onSettlementComplete={() => { invalidateGroupCache(processingGroupId ?? ''); loadGroups(); }} />}
+              {currentPage === 'groupDetail' && <GroupDetailPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId} groups={[...activeGroups, ...recentGroups]} deleteGroup={deleteGroup} leaveGroup={leaveGroup} currentUserId={user?.id ?? ''} itemSplitData={itemSplitData} setItemSplitData={setItemSplitData} receiptData={receiptData} onStartProcessing={(txId) => { setCurrentTransactionId(txId); }} onGroupsChanged={loadGroups} />}
               {currentPage === 'notifications' && <NotificationsPage onNavigate={handleNavigate} theme={theme} notifications={notifications} setNotifications={setNotifications} unreadCount={unreadNotificationCount} acceptInvite={acceptInvite} declineInvite={declineInvite} />}
               {currentPage === 'notificationsSettings' && <NotificationsSettingsPage onNavigate={handleNavigate} theme={theme} />}
               {currentPage === 'privacySettings' && <PrivacySettingsPage onNavigate={handleNavigate} theme={theme} />}
@@ -246,7 +290,14 @@ export default function App() {
               {currentPage === 'appearanceSettings' && <AppearanceSettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} themePreference={themePreference} />}
               {currentPage === 'changePassword' && <ChangePasswordPage onNavigate={handleNavigate} theme={theme} />}
               {currentPage === 'twoFactorAuth' && <TwoFactorAuthPage onNavigate={handleNavigate} theme={theme} />}
-              {currentPage === 'acceptInvite' && <AcceptInvitePage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'acceptInvite' && (
+                <AcceptInvitePage
+                  onNavigate={handleNavigate}
+                  theme={theme}
+                  inviteCode={pendingInviteToken ?? undefined}
+                  onAccepted={() => setPendingInviteToken(null)}
+                />
+              )}
               {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
             </motion.div>
           </AnimatePresence>

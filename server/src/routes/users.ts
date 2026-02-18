@@ -1,7 +1,29 @@
 import { Router } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
+import { fileURLToPath } from 'url';
 import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const uploadsDir = path.join(__dirname, '../../uploads');
+const avatarsDir = path.join(uploadsDir, 'avatars');
+if (!fs.existsSync(avatarsDir)) fs.mkdirSync(avatarsDir, { recursive: true });
+
+const ALLOWED_MIMES = ['image/png', 'image/jpeg', 'image/jpg', 'image/x-png', 'image/webp'];
+const avatarUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, avatarsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname)?.toLowerCase() || '.jpg';
+      cb(null, `${crypto.randomUUID()}${['.png', '.jpg', '.jpeg', '.webp'].includes(ext) ? ext : '.jpg'}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => (ALLOWED_MIMES.includes(file.mimetype) ? cb(null, true) : cb(new Error('Please upload PNG, JPG or WebP'))),
+});
 
 export const usersRouter = Router();
 
@@ -129,4 +151,28 @@ usersRouter.post('/payment-methods', requireAuth, async (req, res) => {
     [id]
   );
   res.status(201).json(rows[0]);
+});
+
+/** Upload profile avatar */
+usersRouter.post('/me/avatar', requireAuth, (req, res, next) => {
+  avatarUpload.single('file')(req, res, (err: unknown) => {
+    if (err) {
+      console.error('Avatar upload multer error:', err);
+      return next(err);
+    }
+    next();
+  });
+}, async (req, res) => {
+  const { userId } = (req as any).user;
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: 'No file uploaded' });
+
+  try {
+    const avatarUrl = `/uploads/avatars/${file.filename}`;
+    await query('UPDATE users SET avatar_url = $1 WHERE id = $2', [avatarUrl, userId]);
+    res.json({ avatarUrl });
+  } catch (err) {
+    console.error('Avatar save error:', err);
+    throw err;
+  }
 });

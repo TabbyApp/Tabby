@@ -45,8 +45,22 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
     cameraInputRef.current?.click();
   };
 
-  const handleManualEntry = () => {
-    onNavigate('receiptItems');
+  const handleManualEntry = async () => {
+    if (!realGroupId) {
+      onNavigate('receiptItems');
+      return;
+    }
+    setUploading(true);
+    setError('');
+    try {
+      const receipt = await api.receipts.create(realGroupId);
+      onReceiptUploaded?.(receipt.id);
+      onNavigate('receiptItems');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start manual entry');
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
