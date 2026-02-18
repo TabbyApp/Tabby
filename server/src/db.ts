@@ -49,3 +49,14 @@ export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<
   }
 }
 
+// Receipt OCR: add columns if not present (ignore duplicate_column 42701)
+async function ensureReceiptOcrColumns() {
+  for (const col of ['parsed_output', 'confidence_map', 'final_snapshot', 'failure_reason']) {
+    try {
+      await pool.query(`ALTER TABLE receipts ADD COLUMN ${col} TEXT`);
+    } catch (e: any) {
+      if (e?.code !== '42701') throw e; // 42701 = duplicate_column
+    }
+  }
+}
+ensureReceiptOcrColumns().catch((e) => console.warn('[db] ensureReceiptOcrColumns:', e?.message));

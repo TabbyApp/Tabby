@@ -1,6 +1,14 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const TOKEN_KEY = 'tabby_access_token';
 
+/** Structured receipt shape (parsed or final snapshot). */
+export interface ParsedReceipt {
+  merchantName?: string;
+  receiptDate?: string | null;
+  totals: { subtotal?: number; tax?: number; tip?: number; total?: number };
+  lineItems: { name: string; price: number; qty?: number; unitPrice?: number }[];
+}
+
 function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
   return localStorage.getItem(TOKEN_KEY);
@@ -215,13 +223,67 @@ export const api = {
           throw new Error(String(err));
         });
     },
+    uploadWithProgress: (
+      groupId: string,
+      file: File | Blob,
+      onProgress: (percent: number, phase: 'upload' | 'processing') => void
+    ): Promise<{ id: string; status: string; parsed_output?: ParsedReceipt; confidence_map?: unknown; validation?: { isValid: boolean; issues: string[]; suggestedFieldsToReview: string[] } }> => {
+      return new Promise((resolve, reject) => {
+        const formData = new FormData();
+        formData.append('groupId', groupId);
+        formData.append('file', file);
+        const token = getAccessToken();
+        const xhr = new XMLHttpRequest();
+
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            onProgress(Math.round((e.loaded / e.total) * 90), 'upload');
+          } else {
+            onProgress(45, 'upload');
+          }
+        });
+
+        xhr.addEventListener('load', () => {
+          onProgress(100, 'processing');
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText));
+            } catch {
+              reject(new Error('Invalid response'));
+            }
+          } else {
+            try {
+              const err = JSON.parse(xhr.responseText || '{}');
+              reject(new Error((err as { error?: string }).error || `Upload failed (${xhr.status})`));
+            } catch {
+              reject(new Error(`Upload failed (${xhr.status})`));
+            }
+          }
+        });
+
+        xhr.addEventListener('error', () => {
+          reject(new Error('Cannot reach server. Make sure the backend is running (cd server && npm run dev).'));
+        });
+
+        xhr.open('POST', `${API_BASE}/receipts/upload`);
+        xhr.withCredentials = true;
+        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.send(formData);
+      });
+    },
     get: (receiptId: string) =>
       request<{
         id: string;
         group_id: string;
+        status: string;
         items: { id: string; name: string; price: number }[];
         claims: Record<string, string[]>;
         members: { id: string; name: string; email: string }[];
+        parsed_output?: ParsedReceipt;
+        confidence_map?: Record<string, number | number[]>;
+        validation?: { isValid: boolean; issues: string[]; suggestedFieldsToReview: string[] };
+        final_snapshot?: ParsedReceipt;
+        file_path?: string;
       }>(`/receipts/${receiptId}`),
     addItem: (receiptId: string, name: string, price: number) =>
       request<{ id: string; name: string; price: number }>(`/receipts/${receiptId}/items`, {
@@ -235,6 +297,19 @@ export const api = {
       }),
     complete: (receiptId: string) =>
       request<{ ok: boolean; splits: { user_id: string; amount: number; name: string }[] }>(`/receipts/${receiptId}/complete`, { method: 'POST' }),
+    confirm: (receiptId: string, payload: ParsedReceipt) =>
+      request<{ ok: boolean; receipt: { id: string; status: string; final_snapshot: ParsedReceipt } }>(`/receipts/${receiptId}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    retry: (receiptId: string) =>
+      request<{
+        id: string;
+        status: string;
+        parsed_output?: ParsedReceipt;
+        confidence_map?: unknown;
+        validation?: { isValid: boolean; issues: string[]; suggestedFieldsToReview: string[] };
+      }>(`/receipts/${receiptId}/retry`, { method: 'POST' }),
     mySplits: () =>
       request<{ id: string; receipt_id: string; amount: number; status: string; created_at: string; group_id: string; group_name: string }[]>(
         '/receipts/splits/me'
