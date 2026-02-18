@@ -208,3 +208,17 @@ try {
 try {
   db.prepare('ALTER TABLE users ADD COLUMN phone TEXT').run();
 } catch { /* column may already exist */ }
+
+// Receipt upload + extraction + review MVP: parsed output, confidence, final snapshot, failure reason
+try {
+  db.prepare('ALTER TABLE receipts ADD COLUMN parsed_output TEXT').run();
+} catch { /* column may already exist */ }
+try {
+  db.prepare('ALTER TABLE receipts ADD COLUMN confidence_map TEXT').run();
+} catch { /* column may already exist */ }
+try {
+  db.prepare('ALTER TABLE receipts ADD COLUMN final_snapshot TEXT').run();
+} catch { /* column may already exist */ }
+try {
+  db.prepare('ALTER TABLE receipts ADD COLUMN failure_reason TEXT').run();
+} catch { /* column may already exist */ }
