@@ -64,7 +64,7 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
       </motion.div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto px-5 pb-24">
+      <div className="flex-1 overflow-y-auto px-5 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         {/* Active Card Section - only when user has groups */}
         {cardInfo && (
           <motion.div

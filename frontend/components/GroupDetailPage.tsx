@@ -572,7 +572,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       </motion.div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-5 py-5">
+      <div className="flex-1 overflow-y-auto px-5 py-5 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         {/* Post-purchase confirmation (view-only) */}
         {isViewOnly && (
           <motion.div
