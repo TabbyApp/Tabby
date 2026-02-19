@@ -12,7 +12,7 @@ export function BottomNavigation({ currentPage, onNavigate, onProfileClick, them
   const isDark = theme === 'dark';
   
   return (
-    <div className={`fixed bottom-0 left-0 right-0 ${isDark ? 'bg-slate-800/95' : 'bg-white/95'} backdrop-blur-2xl border-t ${isDark ? 'border-slate-700' : 'border-slate-200'} z-20`}>
+    <div className={`fixed bottom-0 left-0 right-0 ${isDark ? 'bg-slate-800/95' : 'bg-white/95'} backdrop-blur-2xl border-t ${isDark ? 'border-slate-700' : 'border-slate-200'} z-20 pb-[env(safe-area-inset-bottom,0px)]`}>
       <div className="mx-auto max-w-[430px] px-6 pt-3 pb-7">
         <div className="flex items-center justify-around">
           <button 

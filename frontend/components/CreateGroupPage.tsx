@@ -175,7 +175,7 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
         </motion.div>
       </div>
 
-      <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="px-5 pb-6">
+      <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="px-5 pb-[calc(7rem+env(safe-area-inset-bottom,0px))]">
         <button onClick={createGroup} disabled={!groupName.trim() || creating}
           className={`w-full py-4 rounded-xl font-semibold shadow-lg transition-all ${
             groupName.trim() && !creating
