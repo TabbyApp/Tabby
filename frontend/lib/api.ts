@@ -187,7 +187,7 @@ export const api = {
     list: () =>
       request<{ id: string; name: string; memberCount: number; cardLastFour: string | null }[]>('/groups'),
     create: (name: string, memberEmails?: string[]) =>
-      request<{ id: string; name: string; memberCount: number; cardLastFour: string }>('/groups', {
+      request<{ id: string; name: string; memberCount: number; cardLastFour: string; inviteToken: string; supportCode: string }>('/groups', {
         method: 'POST',
         body: JSON.stringify({ name, memberEmails }),
       }),
@@ -367,10 +367,10 @@ export const api = {
       request<{ id: string; status: string; split_mode: string; receipt_id: string | null; allocation_deadline_at: string | null }[]>(
         `/transactions?groupId=${encodeURIComponent(groupId)}`
       ),
-    create: (groupId: string, splitMode: 'EVEN_SPLIT' | 'FULL_CONTROL') =>
+    create: (groupId: string, splitMode: 'EVEN_SPLIT' | 'FULL_CONTROL', receiptId?: string) =>
       request<{ id: string; group_id: string; status: string; split_mode: string; tip_amount: number; allocation_deadline_at: string }>(
         `/groups/${groupId}/transactions`,
-        { method: 'POST', body: JSON.stringify({ splitMode }) }
+        { method: 'POST', body: JSON.stringify({ splitMode, ...(receiptId ? { receiptId } : {}) }) }
       ),
     get: (id: string) =>
       request<{

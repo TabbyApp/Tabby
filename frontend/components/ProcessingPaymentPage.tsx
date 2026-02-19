@@ -21,6 +21,29 @@ interface ProcessingPaymentPageProps {
 export function ProcessingPaymentPage({ onNavigate, theme, groupId, accountType, transactionId, receiptData, onSettlementComplete }: ProcessingPaymentPageProps) {
   const isDark = theme === 'dark';
   const [step, setStep] = useState<'processing' | 'success'>('processing');
+  // Transaction total and allocations (include tip + tax) from API; overrides receiptData when present
+  const [txDisplay, setTxDisplay] = useState<{ total: number; members: Array<{ id: number; name: string; amount: number; avatar: string }> } | null>(null);
+
+  useEffect(() => {
+    if (!transactionId) return;
+    api.transactions
+      .get(transactionId)
+      .then((data) => {
+        const total = Number(data.total ?? 0);
+        const membersById = new Map((data.members ?? []).map((m) => [m.id, m]));
+        const members = (data.allocations ?? []).map((a, i) => {
+          const m = membersById.get(a.user_id);
+          return {
+            id: i + 1,
+            name: m?.name ?? 'Member',
+            amount: a.amount,
+            avatar: '👤',
+          };
+        });
+        setTxDisplay({ total, members });
+      })
+      .catch(() => {});
+  }, [transactionId]);
 
   useEffect(() => {
     // If we have a transaction, try to settle it
@@ -51,11 +74,11 @@ export function ProcessingPaymentPage({ onNavigate, theme, groupId, accountType,
     };
   }, [onNavigate, transactionId, onSettlementComplete]);
 
-  const members = receiptData?.members || [
+  const fallbackMembers = receiptData?.members || [
     { id: 1, name: 'You', amount: 0, avatar: '👤' },
   ];
-
-  const total = receiptData?.total || members.reduce((sum, m) => sum + m.amount, 0);
+  const members = txDisplay?.members?.length ? txDisplay.members : fallbackMembers;
+  const total = txDisplay?.total ?? receiptData?.total ?? members.reduce((sum, m) => sum + m.amount, 0);
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'} px-5`}>

@@ -17,6 +17,7 @@
     "dotenv": "^17.2.4",
     "express": "^4.21.0",
     "express-async-errors": "^3.1.1",
+    "extractd": "^2.1.2",
     "google-auth-library": "^10.5.0",
     "heic-convert": "^2.1.0",
     "jsonwebtoken": "^9.0.2",
@@ -24,6 +25,7 @@
     "multer": "^1.4.5-lts.1",
     "pg": "^8.13.0",
     "plaid": "^41.1.0",
+    "sharp": "^0.34.5",
     "tesseract.js": "^5.1.1",
     "twilio": "^5.12.1"
   },
