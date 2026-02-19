@@ -53,7 +53,11 @@ async function ensureJpegForOcr(heicOrJpegPath: string): Promise<{ path: string;
   }
   const jpegPath = path.join(path.dirname(heicOrJpegPath), path.basename(heicOrJpegPath, ext) + '.jpg');
   const inputBuffer = fs.readFileSync(heicOrJpegPath);
-  const outputBuffer = await convert({ buffer: inputBuffer, format: 'JPEG', quality: 0.9 });
+  const outputBuffer = await convert({
+    buffer: inputBuffer as unknown as ArrayBuffer,
+    format: 'JPEG',
+    quality: 0.9,
+  });
   fs.writeFileSync(jpegPath, Buffer.from(outputBuffer));
   fs.unlinkSync(heicOrJpegPath);
   return { path: jpegPath, pathUrl: `/uploads/${path.basename(jpegPath)}` };
