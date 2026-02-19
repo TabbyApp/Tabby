@@ -21,12 +21,18 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3001:3001"
+    env_file:
+      - ./server/.env
     environment:
       DATABASE_URL: postgresql://tabby:tabby@db:5432/tabby
       PORT: "3001"
+      DEBUG_ERRORS: "1"
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - tabby_uploads:/app/uploads
 
 volumes:
   tabby_pg:
+  tabby_uploads:

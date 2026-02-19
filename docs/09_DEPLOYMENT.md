@@ -64,7 +64,8 @@ node dist/index.js
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `TABSCANNER_API_KEY` | Yes (for OCR) | — | TabScanner API key |
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `MINDEE_API_KEY` | Yes (for OCR) | — | Mindee API key |
 | `JWT_ACCESS_SECRET` | Production | `'tabby-access-secret-dev'` | JWT signing secret |
 | `JWT_REFRESH_SECRET` | Production | `'tabby-refresh-secret-dev'` | JWT refresh secret |
 | `PORT` | No | `3001` | Server port |
@@ -126,83 +127,43 @@ app.get('*', (req, res) => {
 
 ### Option 3: Docker
 
-Create a `Dockerfile` for the backend:
+The repo includes **Docker Compose** and a **server Dockerfile**:
 
-```dockerfile
-FROM node:20-alpine
-
-WORKDIR /app
-
-# Copy server files
-COPY server/package*.json ./
-RUN npm ci --only=production
-
-COPY server/dist/ ./dist/
-
-# Copy frontend build
-COPY build/ ./public/
-
-# Create data directory for SQLite
-RUN mkdir -p /app/data
-
-ENV NODE_ENV=production
-ENV PORT=3001
-
-EXPOSE 3001
-
-CMD ["node", "dist/index.js"]
-```
+- **`docker-compose.yaml`** (repo root): Defines `db` (PostgreSQL 16) and `api` (Node server). The API runs migrations on startup and connects to Postgres via `DATABASE_URL`.
+- **`server/Dockerfile`**: Multi-stage build; runs migrations then starts the app.
 
 ```bash
-# Build
-docker build -t tabby .
+# Run Postgres + API
+docker compose up
 
-# Run
-docker run -p 3001:3001 \
-  -v tabby-data:/app/data \
-  -e TABSCANNER_API_KEY=your_key \
-  -e JWT_ACCESS_SECRET=your_secret \
-  -e JWT_REFRESH_SECRET=your_secret \
-  tabby
+# Or build and run in background
+docker compose up -d
 ```
 
-> **Important:** SQLite needs persistent storage. Use a Docker volume (`-v tabby-data:/app/data`) to preserve the database across container restarts.
+Set `DATABASE_URL` (and other env) in `.env` or in the `api` service in `docker-compose.yaml`. Use a persistent volume for the `db` service so data survives restarts (the default compose file already mounts a volume for Postgres data).
 
 ---
 
 ## Database Considerations
 
-### SQLite Limitations
+Tabby uses **PostgreSQL**. In production:
 
-SQLite is great for MVP but has limitations for production:
-
-| Concern | SQLite | Postgres (future) |
-|---------|--------|-------------------|
-| Concurrent writes | Single writer | Multiple writers |
-| Scaling | Single server only | Horizontal scaling |
-| Backups | File copy | pg_dump, WAL archiving |
-| Hosting | Embedded (file) | Managed services |
+- Use a managed Postgres service (Supabase, Neon, AWS RDS, etc.) or run Postgres in a container with a persistent volume.
+- Run migrations before or on app startup (`npm run migrate` or the Docker entrypoint).
 
 ### Backup Strategy
 
-For SQLite in production:
+For PostgreSQL:
 
 ```bash
-# Simple backup
-cp data/tabby.db data/tabby.db.backup
+# Full dump
+pg_dump "$DATABASE_URL" -Fc -f tabby-backup.dump
 
-# Or use SQLite online backup
-sqlite3 data/tabby.db ".backup data/tabby.db.backup"
+# Restore
+pg_restore -d "$DATABASE_URL" tabby-backup.dump
 ```
 
-### Migration to Postgres
-
-When ready to scale:
-1. Switch `better-sqlite3` to `pg` or an ORM (Drizzle, Prisma)
-2. Convert schema DDL to Postgres syntax
-3. Migrate data using export/import
-4. Update synchronous DB calls to async
-5. Use a managed Postgres service (Supabase, Neon, AWS RDS)
+Use scheduled backups and WAL archiving where your provider supports it.
 
 ---
 
@@ -242,12 +203,12 @@ Areas to add monitoring:
 
 ## Health Check
 
-The server doesn't have a dedicated health check endpoint yet. Add one for production:
+The server doesn't have a dedicated health check endpoint yet. Add one for production (using the existing `query` helper from `db.ts`):
 
 ```typescript
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   try {
-    db.prepare('SELECT 1').get();
+    await query('SELECT 1');
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   } catch (e) {
     res.status(500).json({ status: 'error', message: 'Database unavailable' });

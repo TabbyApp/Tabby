@@ -1,6 +1,6 @@
 # Database Schema
 
-Tabby uses **SQLite** via the `better-sqlite3` library. The database file lives at `data/tabby.db` and is auto-created on first server startup.
+Tabby uses **PostgreSQL**. The server connects via `DATABASE_URL` (see `server/.env.example`). Schema is applied through **migrations** in `server/migrations/*.sql`; run `cd server && npm run migrate` to apply them. Tables are created by the first migration; later migrations add columns (e.g. `split_mode_preference` on `groups`).
 
 ## Entity Relationship Diagram
 
@@ -78,6 +78,7 @@ Payment session groups.
 | `created_by` | TEXT | NOT NULL, FK → users.id | Host user ID |
 | `created_at` | TEXT | DEFAULT now | ISO 8601 timestamp |
 | `invite_token` | TEXT | | 24-char hex string for invite links (migration-added) |
+| `split_mode_preference` | TEXT | NOT NULL, DEFAULT 'item' | Host's split mode: `'even'` or `'item'` (migration 005) |
 
 ---
 
@@ -226,16 +227,10 @@ CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user   ON refresh_tokens(user_id);
 
 ## Migrations
 
-Migrations are applied inline in `server/src/db.ts` using `ALTER TABLE ... ADD COLUMN` wrapped in try/catch (SQLite throws if column already exists):
+Migrations live in `server/migrations/*.sql` and are applied via `npm run migrate` (e.g. `node scripts/migrate.mjs`). Examples:
 
-```typescript
-try { db.exec("ALTER TABLE users ADD COLUMN bank_linked INTEGER DEFAULT 0"); } catch {}
-try { db.exec("ALTER TABLE groups ADD COLUMN invite_token TEXT"); } catch {}
-try { db.exec("ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''"); } catch {}
-try { db.exec("ALTER TABLE receipts ADD COLUMN transaction_id TEXT"); } catch {}
-```
-
-> **Note:** This approach works for MVP but should migrate to a proper migration system (e.g., `knex` or `drizzle-kit`) before production.
+- **005_split_mode_preference.sql** — Adds `groups.split_mode_preference` (`'even'` \| `'item'`, default `'item'`) so the host's split choice is persisted and visible to all members.
+- Earlier migrations add `invite_token`, `support_code`, `last_settled_at`, receipt/transaction links, etc.
 
 ## Query Patterns
 
@@ -276,11 +271,10 @@ LIMIT 50
 
 ## Resetting the Database
 
-To start fresh:
+To start fresh you need an empty Postgres database (drop/recreate the database or use a new one), then:
 
 ```bash
-rm data/tabby.db
-cd server && npm run seed
+cd server && npm run migrate && npm run seed
 ```
 
-The database is auto-created with all tables on server startup. The seed script adds test data.
+The seed script adds test data. With Docker: `docker compose down -v` removes volumes; then `docker compose up -d` and run migrate + seed inside the API container or against the exposed Postgres port.

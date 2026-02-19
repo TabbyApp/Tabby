@@ -12,8 +12,8 @@ A **group session** in Tabby is equivalent to **one transaction session**. The l
 
 1. A user creates a group (e.g., "Dinner at Nobu").
 2. Members join via invite link or QR code.
-3. A receipt is uploaded (OCR extracts items).
-4. Members claim their items — or the host picks "Even Split."
+3. The **host** uploads a receipt (OCR extracts items). Only the host can add receipts.
+4. Members (including invited users) claim their items from that receipt — or the host picks **Split Evenly**. The host's Even/Item choice is synced so all members see the same split mode.
 5. The host sets a tip and confirms payment.
 6. Tabby simulates charges for everyone.
 7. The transaction settles. The group archives to history.
@@ -26,7 +26,7 @@ Tabby is an **MVP (Minimum Viable Product)** with real settlement via the transa
 
 - Simulated bank linking
 - Virtual cards created per-group in the database
-- OCR-powered receipt scanning (via TabScanner API)
+- OCR-powered receipt scanning (via Mindee API)
 - Real-time item splitting
 - Real payment settlement via transaction API
 
@@ -40,10 +40,11 @@ Tabby is an **MVP (Minimum Viable Product)** with real settlement via the transa
 | **Animations** | Framer Motion | Smooth transitions and micro-interactions |
 | **Icons** | Lucide React | Consistent icon set |
 | **Backend** | Node.js + Express | REST API server |
-| **Database** | SQLite (better-sqlite3) | Embedded relational database |
+| **Database** | PostgreSQL (pg) | Relational database; connection via `DATABASE_URL` |
+| **Docker** | Docker Compose | Optional: runs Postgres + API via `docker compose up` |
 | **Auth** | JWT (jsonwebtoken) | Access + refresh token authentication |
 | **File Upload** | Multer | Multipart form handling |
-| **OCR** | TabScanner API | Receipt text extraction |
+| **OCR** | Mindee API | Receipt text extraction |
 | **Password Hashing** | bcryptjs | Secure password storage |
 | **QR Codes** | qrcode.react | Invite QR code generation |
 
@@ -52,13 +53,14 @@ Tabby is an **MVP (Minimum Viable Product)** with real settlement via the transa
 ```
 Tabby/
 ├── docs/                          # Documentation (you are here)
-├── data/
-│   └── tabby.db                   # SQLite database file (auto-created)
+├── docker-compose.yaml            # Optional: Postgres + API services
 ├── server/                        # Backend API
+│   ├── Dockerfile                 # Multi-stage build for API image
+│   ├── migrations/                # SQL migrations (run via npm run migrate)
 │   ├── src/
 │   │   ├── index.ts               # Express server entry point
-│   │   ├── db.ts                  # Database schema and migrations
-│   │   ├── ocr.ts                 # TabScanner OCR integration
+│   │   ├── db.ts                  # PostgreSQL connection (pg)
+│   │   ├── ocr.ts                 # Mindee OCR integration
 │   │   ├── ocr-worker.ts          # Tesseract.js fallback (standalone)
 │   │   ├── seed.ts                # Database seeding script
 │   │   ├── middleware/
@@ -108,11 +110,11 @@ Tabby/
 
 ## Key Design Decisions
 
-1. **SQLite over Postgres/MySQL** — For MVP simplicity. Single file, zero config, synchronous reads. Will migrate to Postgres when scaling.
+1. **PostgreSQL** — Database is Postgres from day one. Use `DATABASE_URL` (local or Docker). Migrations live in `server/migrations/*.sql` and run via `npm run migrate`. Docker Compose runs Postgres + API with one command.
 2. **No real payments** — Settlement is simulated. The `SETTLED` status is written immediately on finalize. Real Stripe/Plaid integration is a future phase.
 3. **No React Router** — Navigation is managed via a custom `pageState` in `App.tsx`. Pages are rendered conditionally. Persistent tabs (Home, Groups, Activity) stay mounted for performance.
 4. **Mobile-first design** — The app renders inside a phone-shaped frame. All UI targets touch interactions (tap, swipe, bottom sheets).
-5. **TabScanner for OCR** — Tesseract.js was too inaccurate for receipts. TabScanner provides a cloud API with better line-item extraction. A Tesseract fallback script exists but is unused.
+5. **Mindee for OCR** — Tesseract.js was too inaccurate for receipts. Mindee provides a cloud extraction API with better line-item extraction. A Tesseract fallback script exists but is unused.
 
 ## Team Roles (Expected)
 

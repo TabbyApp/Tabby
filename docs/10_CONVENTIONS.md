@@ -233,7 +233,6 @@ node_modules/
 server/node_modules/
 build/
 server/dist/
-data/tabby.db
 server/.env
 server/uploads/*.jpg
 server/uploads/*.png
@@ -318,7 +317,7 @@ Currently there are no automated tests. When adding tests:
 
 ### Backend
 
-- Use prepared statements for all DB queries
-- Database operations are synchronous (better-sqlite3) — keep them fast
+- Use parameterized queries for all DB access ($1, $2, …)
+- Database operations are async (PostgreSQL via pg) — use query() and withTransaction()
 - File cleanup: delete uploaded images on OCR failure
 - Limit query results (LIMIT 50 for activity/splits)

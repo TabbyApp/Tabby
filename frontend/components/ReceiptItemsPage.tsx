@@ -10,9 +10,10 @@ interface ReceiptItemsPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
   setReceiptData: (data: { members: Array<{ id: number; name: string; amount: number; avatar: string }>; total: number }) => void;
-  setItemSplitData: (data: { hasSelectedItems: boolean; yourItemsTotal: number }) => void;
+  setItemSplitData: (data: { hasSelectedItems: boolean; yourItemsTotal: number; receiptTotal?: number; subtotal?: number }) => void;
   receiptId?: string | null;
   groupId?: string | null;
+  onSelectionConfirmed?: (groupId: string) => void;
 }
 
 interface Item {
@@ -32,7 +33,7 @@ interface Member {
 
 const MEMBER_AVATARS = ['👤', '👩', '👨', '👧', '🧑', '👦', '👩‍🦰', '🧔'];
 
-export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSplitData, receiptId, groupId }: ReceiptItemsPageProps) {
+export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSplitData, receiptId, groupId, onSelectionConfirmed }: ReceiptItemsPageProps) {
   const isDark = theme === 'dark';
   const { user } = useAuth();
   
@@ -43,6 +44,8 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
   const [items, setItems] = useState<Item[]>([]);
   const [loading, setLoading] = useState(!!receiptId);
   const [realReceiptId, setRealReceiptId] = useState<string | null>(receiptId ?? null);
+  const [receiptTotal, setReceiptTotal] = useState<number | null>(null);
+  const [uploadedBy, setUploadedBy] = useState<string | null>(null);
   const [receiptStatus, setReceiptStatus] = useState<string>('');
   const [reviewReceipt, setReviewReceipt] = useState<ParsedReceipt | null>(null);
   const [confidenceMap, setConfidenceMap] = useState<Record<string, number | number[]> | null>(null);
@@ -59,6 +62,9 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     setLoading(true);
     api.receipts.get(receiptId).then((data) => {
       setRealReceiptId(data.id);
+      setUploadedBy((data as { uploaded_by?: string }).uploaded_by ?? null);
+      const rt = (data as { total?: number | null }).total;
+      setReceiptTotal(rt != null && !Number.isNaN(Number(rt)) ? Number(rt) : null);
       setReceiptStatus(data.status || '');
       if (data.confidence_map) setConfidenceMap(data.confidence_map);
       if (data.status === 'NEEDS_REVIEW' && data.parsed_output) {
@@ -168,11 +174,13 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
   };
 
   const confirmSubmit = () => {
-    // Complete the receipt on the backend
-    if (realReceiptId) {
+    // Only the receipt uploader can complete (finalize) the split
+    if (realReceiptId && user?.id && uploadedBy && user.id === uploadedBy) {
       api.receipts.complete(realReceiptId).catch(() => {});
     }
 
+    const subtotal = items.reduce((s, i) => s + i.price, 0);
+    const storedReceiptTotal = receiptTotal != null && receiptTotal >= subtotal ? receiptTotal : subtotal;
     const receiptDataPayload = {
       members: members.map(member => ({
         id: member.id,
@@ -189,10 +197,13 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     const yourTotal = calculateMemberTotal(myMember.id);
     setItemSplitData({
       hasSelectedItems: true,
-      yourItemsTotal: yourTotal
+      yourItemsTotal: yourTotal,
+      receiptTotal: storedReceiptTotal,
+      subtotal
     });
     
     setShowConfirmation(false);
+    if (groupId) onSelectionConfirmed?.(groupId);
     // Navigate back to group detail
     onNavigate('groupDetail', groupId ?? undefined);
   };
@@ -462,7 +473,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
       >
         <div className="flex items-center gap-3 mb-4">
           <button 
-            onClick={() => onNavigate('receiptScan')}
+            onClick={() => onNavigate('groupDetail', groupId ?? undefined)}
             className={`w-9 h-9 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center active:scale-95 transition-transform`}
           >
             <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-slate-800'} strokeWidth={2.5} />
@@ -657,6 +668,12 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
               ${calculateMemberTotal(selectedMember).toFixed(2)}
             </p>
           </div>
+          <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'} mb-2`}>
+            Items total: ${items.reduce((s, i) => s + i.price, 0).toFixed(2)}
+            {receiptTotal != null && receiptTotal > items.reduce((s, i) => s + i.price, 0) && (
+              <span className="ml-1">• Receipt total: ${receiptTotal.toFixed(2)}</span>
+            )}
+          </p>
           {!allItemsSelected && (
             <p className="text-xs text-orange-500">
               ⚠️ All items must be selected before submitting

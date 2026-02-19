@@ -10,14 +10,15 @@ interface LandingPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
   groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
+  recentGroups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
   unreadNotificationCount: number;
   pendingInvites: Array<{ id: number; groupName: string; inviterName: string; members: number }>;
   acceptInvite: (inviteId: number) => void;
   declineInvite: (inviteId: number) => void;
-  preloadedCardInfo?: { lastFour: string; balance: number } | null;
+  preloadedCardInfo?: { lastFour: string; balance: number; groupId?: string } | null;
 }
 
-export function LandingPage({ onNavigate, theme, groups, unreadNotificationCount, pendingInvites, acceptInvite, declineInvite, preloadedCardInfo }: LandingPageProps) {
+export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unreadNotificationCount, pendingInvites, acceptInvite, declineInvite, preloadedCardInfo }: LandingPageProps) {
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   // Use preloaded card info from App (loaded during splash) - no extra API call needed
   const cardInfo = preloadedCardInfo ?? null;
@@ -64,44 +65,46 @@ export function LandingPage({ onNavigate, theme, groups, unreadNotificationCount
 
       {/* Main Content */}
       <div className="flex-1 overflow-y-auto px-5 pb-24">
-        {/* Active Card Section */}
-        <motion.div
-          initial={{ y: 8, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.2 }}
-          className="mb-6"
-        >
-          <h2 className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-3 px-1`}>
-            Active Card
-          </h2>
-          <button 
-            onClick={() => onNavigate('cardDetails')}
-            className={`w-full ${isDark ? 'bg-purple-600' : 'bg-purple-600'} rounded-[20px] p-6 active:scale-[0.98] transition-transform relative overflow-hidden`}
+        {/* Active Card Section - only when user has groups */}
+        {cardInfo && (
+          <motion.div
+            initial={{ y: 8, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.2 }}
+            className="mb-6"
           >
-            <div className="relative">
-              <div className="flex items-start justify-between mb-10">
-                <div>
-                  <p className="text-purple-200 text-xs mb-2 font-medium">Virtual Group Card</p>
-                  <p className="text-white font-mono text-xl tracking-wide">
-                    •••• •••• •••• {cardInfo?.lastFour ?? '----'}
-                  </p>
+            <h2 className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-3 px-1`}>
+              Active Card
+            </h2>
+            <button 
+              onClick={() => cardInfo?.groupId && onNavigate('cardDetails', cardInfo.groupId)}
+              className="w-full bg-purple-600 rounded-[20px] p-6 active:scale-[0.98] transition-transform relative overflow-hidden"
+            >
+              <div className="relative">
+                <div className="flex items-start justify-between mb-10">
+                  <div>
+                    <p className="text-purple-200 text-xs mb-2 font-medium">Virtual Group Card</p>
+                    <p className="text-white font-mono text-xl tracking-wide">
+                      •••• •••• •••• {cardInfo?.lastFour ?? '----'}
+                    </p>
+                  </div>
+                  <CreditCard size={28} className="text-white/80" />
                 </div>
-                <CreditCard size={28} className="text-white/80" />
+                <div className="flex items-end justify-between">
+                  <div>
+                    <p className="text-purple-200 text-xs mb-1 font-medium">Group Balance</p>
+                    <p className="text-white text-3xl font-bold">
+                      ${(cardInfo?.balance ?? 0).toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="bg-white text-purple-600 text-xs font-bold px-5 py-2.5 rounded-full">
+                    View Details
+                  </div>
+                </div>
               </div>
-              <div className="flex items-end justify-between">
-                <div>
-                  <p className="text-purple-200 text-xs mb-1 font-medium">Group Balance</p>
-                  <p className="text-white text-3xl font-bold">
-                    ${(cardInfo?.balance ?? 0).toFixed(2)}
-                  </p>
-                </div>
-                <div className="bg-white text-purple-600 text-xs font-bold px-5 py-2.5 rounded-full">
-                  View Details
-                </div>
-              </div>
-            </div>
-          </button>
-        </motion.div>
+            </button>
+          </motion.div>
+        )}
 
         {/* Active Groups */}
         <motion.div
@@ -167,6 +170,57 @@ export function LandingPage({ onNavigate, theme, groups, unreadNotificationCount
             </div>
           )}
         </motion.div>
+
+        {/* Recent Groups */}
+        {recentGroups.length > 0 && (
+          <motion.div
+            initial={{ y: 8, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.2, delay: 0.06 }}
+            className="mb-6"
+          >
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h2 className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider`}>
+                Recent Groups
+              </h2>
+              <button 
+                onClick={() => onNavigate('groups')}
+                className="text-purple-600 text-sm font-semibold"
+              >
+                See All
+              </button>
+            </div>
+            <div className="space-y-3">
+              {recentGroups.slice(0, 2).map((group, index) => (
+                <motion.button
+                  key={group.id}
+                  onClick={() => onNavigate('groupDetail', group.id)}
+                  initial={{ x: -8, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: index * 0.03, duration: 0.15 }}
+                  className={`w-full ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} active:scale-[0.98] transition-transform border opacity-80 ${isDark ? 'border-slate-700' : 'border-slate-100'}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div 
+                        className="w-14 h-14 rounded-[18px] flex items-center justify-center shadow-lg relative"
+                        style={{ backgroundColor: group.color }}
+                      >
+                        <div className="absolute inset-0 bg-black/30 rounded-[18px]" />
+                        <Users size={24} className="text-white relative z-10" strokeWidth={2.5} />
+                      </div>
+                      <div>
+                        <h3 className={`font-bold text-[17px] ${isDark ? 'text-white' : 'text-slate-900'} text-left`}>{group.name}</h3>
+                        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'} text-left`}>{group.members} members · Settled</p>
+                      </div>
+                    </div>
+                    <ArrowRight size={18} className={`${isDark ? 'text-slate-600' : 'text-slate-300'}`} />
+                  </div>
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* Pending Invites */}
         {pendingInvites.length > 0 && (

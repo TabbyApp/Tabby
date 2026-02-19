@@ -5,7 +5,7 @@ import { BottomNavigation } from './BottomNavigation';
 import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
 import { useAuth } from '../contexts/AuthContext';
-import { api } from '../lib/api';
+import { api, assetUrl } from '../lib/api';
 
 interface AccountPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
@@ -25,6 +25,8 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
   const paymentMethods = user?.paymentMethods ?? [];
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [linkingBank, setLinkingBank] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarUrl = (user as { avatarUrl?: string | null })?.avatarUrl ?? null;
 
   useEffect(() => {
     if (user) {
@@ -51,6 +53,25 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
     setPhone(newPhone);
     setIsEditingPhone(false);
     api.users.updateProfile({ phone: newPhone }).catch(() => {});
+  };
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !/^image\//.test(file.type)) return;
+    setUploadingAvatar(true);
+    try {
+      const { avatarUrl: url } = await api.users.uploadAvatar(file);
+      setUser({ ...user!, avatarUrl: url });
+      await refreshBootstrap();
+    } catch (err) {
+      console.error('Avatar upload failed:', err);
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      const debug = err && typeof err === 'object' && 'debug' in err ? (err as { debug?: string }).debug : '';
+      alert(debug ? `${msg}\n\nDebug:\n${debug}` : msg);
+    } finally {
+      setUploadingAvatar(false);
+      e.target.value = '';
+    }
   };
 
   const handleLinkBank = async () => {
@@ -90,10 +111,19 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
           transition={{ duration: 0.12 }}
           className="flex flex-col items-center mb-8"
         >
-          <div className="w-24 h-24 rounded-full bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center text-white shadow-xl mb-4">
-            <User size={40} strokeWidth={2.5} />
-          </div>
-          <button className="text-violet-600 font-medium text-sm active:scale-95 transition-transform">Change Photo</button>
+          <label className="relative cursor-pointer">
+            <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} disabled={uploadingAvatar} />
+            <div className="w-24 h-24 rounded-full overflow-hidden bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center text-white shadow-xl mb-4 ring-2 ring-white/20">
+              {avatarUrl ? (
+                <img src={assetUrl(avatarUrl)} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <User size={40} strokeWidth={2.5} />
+              )}
+            </div>
+            <span className="text-violet-600 font-medium text-sm active:scale-95 transition-transform block text-center">
+              {uploadingAvatar ? 'Uploading...' : 'Change Photo'}
+            </span>
+          </label>
         </motion.div>
 
         {/* Personal Information */}

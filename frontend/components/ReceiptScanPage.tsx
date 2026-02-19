@@ -9,9 +9,11 @@ interface ReceiptScanPageProps {
   theme: 'light' | 'dark';
   realGroupId?: string | null;
   onReceiptUploaded?: (receiptId: string) => void;
+  returnToGroupAfterUpload?: boolean;
+  onReturnToGroup?: () => void;
 }
 
-export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploaded }: ReceiptScanPageProps) {
+export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploaded, returnToGroupAfterUpload, onReturnToGroup }: ReceiptScanPageProps) {
   const isDark = theme === 'dark';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -35,7 +37,12 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
         setUploadPhase(phase);
       });
       onReceiptUploaded?.(result.id);
-      onNavigate('receiptItems');
+      if (returnToGroupAfterUpload) {
+        onReturnToGroup?.();
+        onNavigate('groupDetail', realGroupId);
+      } else {
+        onNavigate('receiptItems');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -52,8 +59,19 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
     cameraInputRef.current?.click();
   };
 
-  const handleManualEntry = () => {
-    onNavigate('receiptItems');
+  const handleManualEntry = async () => {
+    if (!realGroupId || returnToGroupAfterUpload) return; // Manual entry only for item split (creates empty receipt)
+    setUploading(true);
+    setError('');
+    try {
+      const receipt = await api.receipts.create(realGroupId);
+      onReceiptUploaded?.(receipt.id);
+      onNavigate('receiptItems');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start manual entry');
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -89,7 +107,7 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
       >
         <div className="flex items-center gap-3">
           <button 
-            onClick={() => onNavigate('home')}
+            onClick={() => returnToGroupAfterUpload && realGroupId ? onNavigate('groupDetail', realGroupId) : onNavigate('home')}
             className={`w-11 h-11 rounded-[16px] ${isDark ? 'bg-slate-700' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform shadow-sm`}
           >
             <ChevronLeft size={22} className={isDark ? 'text-white' : 'text-purple-600'} strokeWidth={2.5} />
@@ -154,14 +172,16 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
                 <Upload size={22} strokeWidth={2.5} />
                 Choose from Gallery
               </button>
-              <button 
-                onClick={handleManualEntry}
-                disabled={uploading}
-                className={`w-full ${isDark ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-50 text-slate-800 border-slate-200'} border-2 py-4 rounded-[18px] font-bold active:scale-[0.98] transition-transform flex items-center justify-center gap-2.5 text-[16px] disabled:opacity-60`}
-              >
-                <Edit3 size={22} strokeWidth={2.5} />
-                Manual Entry
-              </button>
+              {!returnToGroupAfterUpload && (
+                <button 
+                  onClick={handleManualEntry}
+                  disabled={uploading}
+                  className={`w-full ${isDark ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-50 text-slate-800 border-slate-200'} border-2 py-4 rounded-[18px] font-bold active:scale-[0.98] transition-transform flex items-center justify-center gap-2.5 text-[16px] disabled:opacity-60`}
+                >
+                  <Edit3 size={22} strokeWidth={2.5} />
+                  Manual Entry
+                </button>
+              )}
             </div>
           </div>
 

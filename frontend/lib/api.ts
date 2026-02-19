@@ -1,6 +1,18 @@
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const TOKEN_KEY = 'tabby_access_token';
 
+/** Resolve server asset URL (e.g. /uploads/avatars/xxx) to full URL for img src */
+export function assetUrl(path: string | null | undefined): string {
+  if (!path || typeof path !== 'string') return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  try {
+    const base = typeof window !== 'undefined' ? window.location.origin : '';
+    return path.startsWith('/') ? `${base}${path}` : path;
+  } catch {
+    return path;
+  }
+}
+
 /** Structured receipt shape (parsed or final snapshot). */
 export interface ParsedReceipt {
   merchantName?: string;
@@ -125,6 +137,12 @@ export const api = {
         skipAuth: true,
       }),
     logout: () => request<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+    sendOtp: (phone: string) =>
+      request<{ ok: boolean }>('/auth/send-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone }),
+        skipAuth: true,
+      }),
     verifyOtp: (phone: string, code: string, name?: string) =>
       request<{ accessToken: string; user: { id: string; email: string; name: string; phone?: string } }>('/auth/verify-otp', {
         method: 'POST',
@@ -139,6 +157,25 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),
+    uploadAvatar: (file: File | Blob) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const token = getAccessToken();
+      return fetch(`${API_BASE}/users/me/avatar`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: 'include',
+        body: formData,
+      }).then(async (r) => {
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({})) as { error?: string; debug?: string };
+          const e = new Error(err.error || `Upload failed (${r.status})`) as Error & { debug?: string };
+          if (err.debug) e.debug = err.debug;
+          throw e;
+        }
+        return r.json() as Promise<{ avatarUrl: string }>;
+      });
+    },
     linkBank: () => request<{ ok: boolean; bank_linked: boolean }>('/users/link-bank', { method: 'POST' }),
     addPaymentMethod: (type: 'bank' | 'card', lastFour: string, brand?: string) =>
       request<{ id: string; type: string; last_four: string; brand: string | null }>(
@@ -155,7 +192,7 @@ export const api = {
         body: JSON.stringify({ name, memberEmails }),
       }),
     get: (groupId: string) =>
-      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string }[]; cardLastFour: string | null; inviteToken: string | null }>(
+      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; avatarUrl?: string }[]; cardLastFour: string | null; inviteToken: string | null; supportCode: string | null; lastSettledAt: string | null; splitModePreference?: string }>(
         `/groups/${groupId}`
       ),
     /** Batch fetch group details - 1 request instead of N (avoids connection queueing) */
@@ -165,9 +202,12 @@ export const api = {
         members: { id: string; name: string; email: string }[];
         cardLastFour: string | null; inviteToken: string;
         receipts: { id: string; group_id: string; status: string; total: number | null; created_at: string; splits?: unknown[] }[];
+        splitModePreference?: string;
       }>>(
         `/groups/batch?ids=${encodeURIComponent(groupIds.join(','))}`
       ),
+    joinPreview: (token: string) =>
+      request<{ groupName: string }>(`/groups/join/${token}`),
     joinByToken: (token: string) =>
       request<{ groupId: string; groupName: string; joined: boolean }>(`/groups/join/${token}`, { method: 'POST' }),
     deleteGroup: (groupId: string) =>
@@ -176,12 +216,19 @@ export const api = {
       request<{ ok: boolean }>(`/groups/${groupId}/leave`, { method: 'POST' }),
     removeMember: (groupId: string, memberId: string) =>
       request<{ ok: boolean }>(`/groups/${groupId}/members/${memberId}`, { method: 'DELETE' }),
+    updateSplitModePreference: (groupId: string, splitModePreference: 'even' | 'item') =>
+      request<{ ok: boolean }>(`/groups/${groupId}`, { method: 'PUT', body: JSON.stringify({ splitModePreference }) }),
     virtualCards: () =>
       request<{ groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[]>(
         '/groups/virtual-cards/list'
       ),
   },
   receipts: {
+    create: (groupId: string) =>
+      request<{ id: string }>('/receipts', {
+        method: 'POST',
+        body: JSON.stringify({ groupId }),
+      }),
     list: (groupId: string) =>
       request<
         {
@@ -333,9 +380,12 @@ export const api = {
         claims: Record<string, string[]>; members: { id: string; name: string; email: string }[];
         allocations: { user_id: string; amount: number }[];
       }>(`/transactions/${id}`),
-    uploadReceipt: (transactionId: string, file: File | Blob) => {
+    uploadReceipt: (transactionId: string, file: File | Blob, receiptTotal?: number) => {
       const formData = new FormData();
       formData.append('file', file);
+      if (receiptTotal != null && !Number.isNaN(receiptTotal)) {
+        formData.append('receiptTotal', String(receiptTotal));
+      }
       const token = getAccessToken();
       return fetch(`${API_BASE}/transactions/${transactionId}/receipt`, {
         method: 'POST',

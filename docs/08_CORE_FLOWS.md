@@ -46,7 +46,8 @@ Frontend: CreateGroupPage
 2. Opens the link
 3. If not logged in: sees login/signup page → logs in
 4. If bank not linked: links bank from Account page
-5. Automatically joins the group and sees the GroupDetailPage
+5. Accepts invite → automatically joins the group and sees the GroupDetailPage
+6. If the host has already uploaded a receipt (pending item split), the **invited user** sees **"Select Your Items"** and can tap it to open ReceiptItemsPage with that receipt, claim their items, and confirm. The group page shows **"Who selected what"** for all members.
 
 ### Technical Flow
 
@@ -64,6 +65,13 @@ App routes to AcceptInvitePage when URL path is /join/TOKEN:
     │   │   4. Return { groupId, groupName, joined: true }
     │   │
     │   └── onNavigate({ page: 'groupDetail', groupId })
+    │
+    └── On GroupDetailPage (invited user):
+        ├── If group has a pending receipt: show "Select Your Items" (not "Scan Receipt")
+        ├── handleNavigateToReceiptItems(groupId, latestPendingReceipt.id) → sets processingGroupId + lastReceiptId, navigates to ReceiptItemsPage
+        ├── ReceiptItemsPage loads receipt via api.receipts.get(receiptId); user selects items; claims synced via PUT /receipts/:receiptId/items/:itemId/claims
+        ├── Only the receipt uploader (host) can call POST /receipts/:receiptId/complete; invited user just confirms and returns to group
+        └── Group page fetches receipt detail (items + claims) and shows "Who selected what" per member
 ```
 
 ### Invite Link Generation
@@ -80,14 +88,14 @@ The QR code encodes this same URL using `qrcode.react`.
 
 ## 3. Even Split Payment
 
-EVEN_SPLIT is handled entirely on GroupDetailPage (no TransactionAllocationPage). GroupDetailPage creates transactions via `api.transactions.create()`, sets tip via `api.transactions.setTip()`, and finalizes via `api.transactions.finalize()`.
+EVEN_SPLIT is handled entirely on GroupDetailPage. Only the **host** can add a receipt. When the host chooses **"Split Evenly"** and taps **"Add Receipt"**, they are taken to ReceiptScanPage; after a successful upload they **return to GroupDetailPage** (not ReceiptItemsPage), and the receipt total is shown for even split. The host then sets tip and confirms.
 
 ### User Experience
 
 1. Host opens group → GroupDetailPage
-2. Split mode is set to **"Even"** (default)
-3. Host taps **"Upload Receipt"** → takes a photo
-4. OCR processes the receipt → total is extracted
+2. Host selects **"Split Evenly"** (split mode is synced to server via PUT `/groups/:groupId` so all members see the same mode)
+3. Host taps **"Add Receipt"** → ReceiptScanPage → takes a photo or picks image
+4. OCR processes the receipt → receipt (and total) created; host is navigated **back to GroupDetailPage** with the new receipt reflected
 5. Host adjusts **tip** via slider
 6. Sees per-person amount: `(total + tip) / members`
 7. Host taps **"Confirm & Pay"**
@@ -107,7 +115,7 @@ GroupDetailPage (Even Split):
     │   │   │
     │   │   ▼  Backend: POST /api/transactions/:id/receipt
     │   │   1. Save file via multer
-    │   │   2. Run OCR (TabScanner: upload → wait → poll → extract)
+    │   │   2. Run OCR (Mindee: enqueue → poll → fetch result → extract)
     │   │   3. Create receipt record
     │   │   4. Create receipt_items from OCR results
     │   │   5. Calculate subtotal from items
@@ -148,60 +156,46 @@ GroupDetailPage (Even Split):
 
 ## 4. Item Split (Full Control) Payment
 
+Only the **host** can upload a receipt. When there is a **pending receipt**, all members (including invited users) see **"Select Your Items"** and can open ReceiptItemsPage to claim items. The receipt total is fixed from the receipt (no manual override). The host's choice of **Even** vs **Item** split is stored in `groups.split_mode_preference` and synced so all members see the same toggle state (when not locked by a pending receipt).
+
 ### User Experience
 
-1. Host opens group → switches to **"Item split"** mode
-2. Host taps **"Upload Receipt"** → takes a photo
-3. OCR processes → items listed on ReceiptItemsPage
-4. Each member is selected via tabs at the top
-5. Tap items to assign them to the selected member
-6. Multiple members can share an item (split cost)
-7. Tap **"Confirm Selections"** → returns to GroupDetailPage
-8. GroupDetailPage shows **item breakdown** per member
-9. Host adjusts **tip** via slider
-10. Host taps **"Confirm & Pay"**
-11. Processing animation → settlement
+1. Host opens group → switches to **"Item split"** mode (choice is saved via PUT `/groups/:groupId` with `splitModePreference: 'item'`).
+2. Host taps **"Scan Receipt"** (only host sees this) → takes a photo → OCR → ReceiptItemsPage with items.
+3. Host (and optionally invited members) select items per member; multiple members can share an item.
+4. Receipt total is from OCR/receipt only (no user-editable total).
+5. Tap **"Confirm Selections"** → only the **receipt uploader** may call `POST /receipts/:receiptId/complete`; others just return to group.
+6. GroupDetailPage shows **"Who selected what"** (member-wise item breakdown) and item split summary.
+7. Host adjusts **tip** and taps **"Confirm & Pay"** → processing → settlement.
 
 ### Technical Flow
 
 ```
-GroupDetailPage (Full Control):
+GroupDetailPage (Item Split):
     │
-    ├── 1. Upload Receipt
-    │   ├── Create transaction: api.transactions.create(groupId, 'FULL_CONTROL')
-    │   ├── Upload file: api.transactions.uploadReceipt(txId, file)
-    │   └── Navigate to ReceiptItemsPage
+    ├── Split mode: Host can toggle Even/Item; preference saved via api.groups.updateSplitModePreference(groupId, 'item').
+    │   When a pending receipt exists, non-hosts are locked to item split; host can still change mode.
+    │   Members poll GET /groups/:groupId every 15s to see updated splitModePreference.
     │
-    ├── 2. ReceiptItemsPage — Assign Items
-    │   ├── Load items: api.transactions.get(txId)
-    │   │   └── Returns items, claims, members
-    │   │
-    │   ├── Select member tab → select items
-    │   │   └── api.transactions.setClaims(txId, itemId, [userId1, userId2])
-    │   │       │
-    │   │       ▼  Backend: PUT /api/transactions/:id/items/:itemId/claims
-    │   │       1. Delete existing claims for this item
-    │   │       2. INSERT new claims
-    │   │       3. Return { userIds }
-    │   │
-    │   ├── (Optional) Add manual items
-    │   │   └── api.receipts.addItem(receiptId, name, price)
-    │   │
-    │   └── Tap "Confirm Selections"
-    │       └── onNavigate({ page: 'groupDetail', groupId })
+    ├── 1. Upload Receipt (host only)
+    │   ├── onNavigateToReceiptScan(groupId, false) → ReceiptScanPage (forEvenSplit = false)
+    │   ├── api.receipts.upload(groupId, file) → receipt + items from OCR; total from OCR
+    │   └── onNavigate('receiptItems') with lastReceiptId set
+    │
+    ├── 2. ReceiptItemsPage — Assign Items (host or invited members)
+    │   ├── Load: api.receipts.get(receiptId) → items, claims, members
+    │   ├── Select member tab → tap items → api.receipts.updateClaims(receiptId, itemId, userIds)
+    │   ├── (Optional) Add manual items: api.receipts.addItem(receiptId, name, price)
+    │   ├── Confirm: only if user is receipt uploader → api.receipts.complete(receiptId); else just navigate back
+    │   └── onNavigate('groupDetail', groupId); onSelectionConfirmed invalidates group cache
     │
     ├── 3. GroupDetailPage — Review Breakdown
-    │   ├── Fetch transaction details: api.transactions.get(txId)
-    │   ├── Display per-member breakdown:
-    │   │   ├── Member avatar + name
-    │   │   ├── Each item claimed (with split indicator)
-    │   │   ├── Member subtotal
-    │   │   └── Subtotal / Tip / Grand Total
-    │   │
-    │   ├── Tip slider (host only)
-    │   └── "Edit Selections" button → back to ReceiptItemsPage
+    │   ├── Receipt detail (items + claims) fetched for pending receipt → "Who selected what" per member
+    │   ├── Tip slider; "Edit" reopens ReceiptItemsPage with same receiptId via onNavigateToReceiptItems
+    │   └── Create transaction and finalize when host confirms
     │
     ├── 4. Confirm & Pay
+    │   ├── api.transactions.create(groupId, 'FULL_CONTROL')
     │   ├── api.transactions.setTip(txId, fullTipAmount)
     │   ├── api.transactions.finalize(txId)
     │   │   │
@@ -260,15 +254,13 @@ Frontend uploads file (multipart/form-data)
     │
     ├── Save to server/uploads/{uuid}.jpg
     │
-    ├── POST image to TabScanner API
-    │   └── https://api.tabscanner.com/api/2/process
-    │       Body: form-data with image file
-    │       Header: apikey: TABSCANNER_API_KEY
+    ├── POST image to Mindee API
+    │   └── https://api-v2.mindee.net/v2/products/extraction/enqueue
+    │       Body: form-data with model_id + image file
+    │       Header: Authorization: Token MINDEE_API_KEY
     │
-    ├── Wait 5.5 seconds (TabScanner processing time)
-    │
-    ├── Poll TabScanner result every 1 second (max 25s)
-    │   └── GET https://api.tabscanner.com/api/result/{token}
+    ├── Poll Mindee job until status Processed
+    │   └── GET {polling_url} → then GET {result_url}
     │       └── Check status === 'done'
     │
     ├── Extract lineItems from result
@@ -286,7 +278,7 @@ Frontend uploads file (multipart/form-data)
 
 ### Fallback: Tesseract.js (Not Active)
 
-A standalone `ocr-worker.ts` exists for local Tesseract.js OCR but is **not used** in the current flow. It was replaced by TabScanner for accuracy.
+A standalone `ocr-worker.ts` exists for local Tesseract.js OCR but is **not used** in the current flow. It was replaced by Mindee for accuracy.
 
 ---
 
@@ -358,6 +350,28 @@ GroupDetailPage → More menu → "Leave Group" → Confirmation dialog
     │
     └── Navigate to groups list
 ```
+
+### Split Mode Preference (Host Only)
+
+The host's choice of **Split Evenly** vs **Item Split** is stored on the server so all members see the same mode.
+
+```
+GroupDetailPage → Host toggles "Split Evenly" or "Item Split"
+    │
+    ├── handleSplitModeChange(mode) → api.groups.updateSplitModePreference(groupId, mode)
+    │   │
+    │   ▼  Backend: PUT /api/groups/:groupId  { "splitModePreference": "even" | "item" }
+    │   1. Verify user is the creator
+    │   2. UPDATE groups SET split_mode_preference = ?
+    │   3. Return { ok: true }
+    │
+    ├── invalidateGroupCache(groupId); onGroupsChanged()
+    └── Non-host members see updated mode within ~15s (poll GET /groups/:groupId) or on next load
+```
+
+When a **pending receipt** exists (item split in progress), non-hosts are locked to item split; the host can still change the preference.
+
+---
 
 ### Remove Member (Host Only)
 

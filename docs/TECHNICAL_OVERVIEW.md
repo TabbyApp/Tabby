@@ -19,13 +19,13 @@ Tabby is a **split-payments web application** with a clear separation between fr
                                     │
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         SERVER (Node.js)                             │
-│  Express  │  JWT Auth  │  SQLite (better-sqlite3)  │  TabScanner OCR │
-│  Port 3001│  middleware│  data/tabby.db            │  (external API) │
+│  Express  │  JWT Auth  │  PostgreSQL (pg)          │  Mindee OCR     │
+│  Port 3001│  middleware│  DATABASE_URL             │  (external API) │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Frontend**: React 18, Vite 6, TypeScript, Tailwind CSS, Radix UI. Single-page app with client-side routing via React state (no URL router).
-- **Backend**: Node.js, Express, TypeScript (compiled via `tsx` in dev). All persistence in SQLite.
+- **Backend**: Node.js, Express, TypeScript (compiled via `tsx` in dev). All persistence in PostgreSQL (connection via `DATABASE_URL`).
 - **Proxy**: Vite dev server proxies `/api` and `/uploads` to the backend so the frontend uses relative URLs and avoids CORS.
 
 ---
@@ -84,9 +84,9 @@ All `/api/users`, `/api/groups`, `/api/receipts` routes (except public endpoints
 
 ---
 
-## 3. Database Schema (SQLite)
+## 3. Database Schema (PostgreSQL)
 
-The database lives at `data/tabby.db` and is created/initialized by `server/src/db.ts` on first import.
+The server connects to PostgreSQL using `DATABASE_URL`. Schema is applied via **migrations** in `server/migrations/*.sql`; run `npm run migrate` in `server/` to apply them. `server/src/db.ts` provides the connection pool and helpers (`query`, `withTransaction`).
 
 ### 3.1 Entity-Relationship Overview
 
@@ -113,7 +113,7 @@ receipt_items ── item_claims (N:M with users)
 | **users**         | id (UUID), email (unique), password_hash, name          | User accounts                                     |
 | **refresh_tokens**| id, user_id, token_hash, expires_at                     | Stored refresh tokens for validation              |
 | **payment_methods**| id, user_id, type (bank/card), last_four, brand        | Mock payment methods (no real billing)            |
-| **groups**        | id, name, created_by (FK users)                         | Expense groups                                    |
+| **groups**        | id, name, created_by, split_mode_preference ('even'\|'item') | Expense groups; host's split mode for all members |
 | **group_members** | group_id, user_id (composite PK)                        | Many-to-many: users in groups                     |
 | **virtual_cards** | id, group_id (unique), card_number_last_four            | Simulated group card (last 4 digits only)         |
 | **receipts**      | id, group_id, uploaded_by, file_path, total, status     | Receipt metadata and image path                   |
@@ -127,7 +127,7 @@ Indexes exist for common lookups: `users.email`, `refresh_tokens.user_id`, `refr
 
 ### 3.4 Access Pattern
 
-All DB access is **synchronous** via `better-sqlite3`. Prepared statements are used for parameterized queries. Transactions are used for multi-step operations (e.g., group creation with members and virtual card) via `db.transaction(() => { ... })()`.
+All DB access is **async** via the `pg` driver. Parameterized queries use `$1`, `$2`, etc. Multi-step operations use `withTransaction()` (e.g., group creation with members and virtual card). Migrations are run separately via `npm run migrate`.
 
 ---
 
@@ -157,7 +157,9 @@ All APIs are REST-style JSON over HTTP. Base path: `/api`.
 |--------|----------------------|------|----------------------------------------------|
 | GET    | /                    | Yes  | List groups (with member count, card last 4)  |
 | POST   | /                    | Yes  | Create group + virtual card + add members     |
-| GET    | /:groupId            | Yes  | Group details + members (membership checked)  |
+| GET    | /:groupId            | Yes  | Group details + members + splitModePreference |
+| PATCH  | /:groupId            | Yes  | Update group (host only), e.g. splitModePreference |
+| PUT    | /:groupId            | Yes  | Same as PATCH (proxy compatibility)           |
 | GET    | /virtual-cards/list  | Yes  | User's groups with card + total spent         |
 
 **Group creation logic** (`POST /`):
@@ -197,16 +199,16 @@ This is the core data-ingestion pipeline.
    - Verifies user is a member of the group.
    - Calls `extractReceiptItems(fullPath)` — **OCR**.
 
-### 5.2 OCR Implementation (TabScanner API)
+### 5.2 OCR Implementation (Mindee API)
 
-`server/src/ocr.ts` uses the **TabScanner** cloud API (not Tesseract locally):
+`server/src/ocr.ts` uses the **Mindee** extraction API (not Tesseract locally):
 
-1. **Process**: `POST https://api.tabscanner.com/api/2/process` with:
-   - Header: `apikey: TABSCANNER_API_KEY` (from `process.env`, loaded via `dotenv`).
+1. **Enqueue**: `POST https://api-v2.mindee.net/v2/products/extraction/enqueue` with:
+   - Header: `Authorization: Token MINDEE_API_KEY` (from `process.env`, loaded via `dotenv`).
    - Body: `multipart/form-data` with the image file.
 2. **Response**: JSON with `token` (or `duplicateToken` if image was already processed).
-3. **Wait**: Sleep ~5.5 seconds (TabScanner processes asynchronously).
-4. **Poll**: `GET https://api.tabscanner.com/api/result/{token}` every 1 second, up to ~25 seconds.
+3. **Poll**: Poll job status until Processed (Mindee processes asynchronously).
+4. **Poll**: `GET {polling_url}` until status `Processed`, then `GET {result_url}` for line items.
 5. **Parse**: When `status === 'done'`, extract `result.lineItems` — each has `descClean`, `lineTotal`, etc.
 6. **Map**: Convert to `{ name, price }[]`, filtering invalid entries (empty name, bad price).
 
@@ -324,7 +326,7 @@ On mount, `AuthContext`:
 
 | Variable           | Where   | Purpose                                  |
 |--------------------|---------|------------------------------------------|
-| `TABSCANNER_API_KEY` | server | TabScanner OCR API key                   |
+| `MINDEE_API_KEY` | server | Mindee OCR API key (custom extraction model) |
 | `JWT_ACCESS_SECRET`  | server | Sign/verify access tokens (default dev)  |
 | `JWT_REFRESH_SECRET` | server | Sign/verify refresh tokens (default dev) |
 | `PORT`               | server | Server port (default 3001)               |
@@ -358,14 +360,14 @@ On mount, `AuthContext`:
 | Path                    | Responsibility                                      |
 |-------------------------|-----------------------------------------------------|
 | `server/src/index.ts`   | Express app, middleware, route mounting, dotenv     |
-| `server/src/db.ts`      | SQLite connection, schema creation                  |
+| `server/src/db.ts`      | PostgreSQL connection pool, query/withTransaction   |
 | `server/src/middleware/auth.ts` | JWT sign/verify, requireAuth                |
 | `server/src/routes/auth.ts`     | Signup, login, refresh, logout             |
 | `server/src/routes/users.ts`    | GET /me, POST payment-methods              |
 | `server/src/routes/groups.ts`   | Groups CRUD, virtual cards                 |
 | `server/src/routes/transactions.ts` | List, get, upload receipt, tip, claims, finalize, settle |
 | `server/src/routes/receipts.ts` | Upload, list, get, items, claims, complete |
-| `server/src/ocr.ts`     | TabScanner API integration                          |
+| `server/src/ocr.ts`     | Mindee API integration                              |
 | `src/contexts/AuthContext.tsx`  | Auth state, login/signup/logout            |
 | `src/lib/api.ts`        | HTTP client, token attach, refresh retry            |
 | `src/App.tsx`           | Page state, conditional rendering                   |
@@ -375,4 +377,4 @@ On mount, `AuthContext`:
 
 ## 13. Summary
 
-Tabby is a vertically integrated split-payments app: React frontend with state-based routing, Express backend with JWT auth, SQLite persistence, and TabScanner for receipt OCR. The receipt flow—upload → OCR → itemization → claims → split computation—is the central business logic, with groups and virtual cards providing the social and payment context. All monetary operations are simulated; no real payment processing occurs.
+Tabby is a vertically integrated split-payments app: React frontend with state-based routing, Express backend with JWT auth, PostgreSQL persistence, and Mindee for receipt OCR. The receipt flow—upload → OCR → itemization → claims → split computation—is the central business logic, with groups and virtual cards providing the social and payment context. All monetary operations are simulated; no real payment processing occurs.

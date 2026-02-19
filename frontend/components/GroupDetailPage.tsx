@@ -1,11 +1,11 @@
 import { motion, AnimatePresence } from 'motion/react';
-import { ChevronLeft, Users, Receipt, Trash2, UserMinus, LogOut, Plus, MoreVertical, UserPlus, DollarSign, Check, Copy, Link2 } from 'lucide-react';
+import { ChevronLeft, Users, Receipt, Trash2, UserMinus, LogOut, Plus, MoreVertical, UserPlus, DollarSign, Check, Copy, Link2, CreditCard } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { PageType } from '../App';
 import { BottomNavigation } from './BottomNavigation';
 import { ProfileSheet } from './ProfileSheet';
 import { useAuth } from '../contexts/AuthContext';
-import { api } from '../lib/api';
+import { api, assetUrl } from '../lib/api';
 import { getCachedGroupDetail, setCachedGroupDetail, invalidateGroupCache } from '../lib/groupCache';
 
 interface GroupDetailPageProps {
@@ -16,11 +16,13 @@ interface GroupDetailPageProps {
   deleteGroup: (groupId: string) => void;
   leaveGroup: (groupId: string) => void;
   currentUserId: string;
-  itemSplitData: { hasSelectedItems: boolean; yourItemsTotal: number };
-  setItemSplitData: (data: { hasSelectedItems: boolean; yourItemsTotal: number }) => void;
+  itemSplitData: { hasSelectedItems: boolean; yourItemsTotal: number; receiptTotal?: number; subtotal?: number };
+  setItemSplitData: (data: { hasSelectedItems: boolean; yourItemsTotal: number; receiptTotal?: number; subtotal?: number }) => void;
   receiptData?: { members: Array<{ id: number; name: string; amount: number; avatar: string }>; total: number } | null;
   onStartProcessing?: (transactionId: string) => void;
   onGroupsChanged?: () => void;
+  onNavigateToReceiptItems?: (groupId: string, receiptId: string) => void;
+  onNavigateToReceiptScan?: (groupId: string, forEvenSplit: boolean) => void;
 }
 
 const AVATAR_COLORS = [
@@ -32,8 +34,58 @@ const AVATAR_COLORS = [
   'from-teal-500 to-cyan-600',
 ];
 
-export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGroup, leaveGroup, currentUserId, itemSplitData, setItemSplitData, receiptData, onStartProcessing, onGroupsChanged }: GroupDetailPageProps) {
-  const { user } = useAuth();
+function MemberSelectionsSection({
+  receiptDetail,
+  realMembers,
+  user,
+  isDark,
+}: {
+  receiptDetail: { items: { id: string; name: string; price: number }[]; claims: Record<string, string[]>; members: { id: string; name: string }[] };
+  realMembers: { id: string; name: string }[];
+  user: { id?: string } | null;
+  isDark: boolean;
+}) {
+  const itemsById = Object.fromEntries(receiptDetail.items.map((i) => [i.id, i]));
+  const membersById = Object.fromEntries(receiptDetail.members.map((m) => [m.id, m]));
+  const byMember: Record<string, { name: string; items: { name: string; price: number }[]; total: number }> = {};
+  for (const [itemId, userIds] of Object.entries(receiptDetail.claims)) {
+    const item = itemsById[itemId];
+    if (!item) continue;
+    const share = item.price / userIds.length;
+    for (const uid of userIds) {
+      if (!byMember[uid]) byMember[uid] = { name: membersById[uid]?.name ?? 'Unknown', items: [], total: 0 };
+      byMember[uid].items.push({ name: item.name, price: share });
+      byMember[uid].total += share;
+    }
+  }
+  const entries = Object.entries(byMember);
+  if (entries.length === 0) return null;
+  return (
+    <div className={`mt-6 pt-6 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+      <h4 className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'} mb-3`}>Who selected what</h4>
+      <div className="space-y-3 text-left">
+        {entries.map(([uid, { name, items, total }]) => (
+          <div key={uid} className={`rounded-xl p-3 ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+            <p className={`font-semibold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              {uid === user?.id ? 'You' : name}
+            </p>
+            <ul className={`text-xs mt-1 space-y-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              {items.map((it, i) => (
+                <li key={i}>{it.name} — ${it.price.toFixed(2)}</li>
+              ))}
+            </ul>
+            <p className={`text-xs font-medium mt-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+              Subtotal: ${total.toFixed(2)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGroup, leaveGroup, currentUserId, itemSplitData, setItemSplitData, receiptData, onStartProcessing, onGroupsChanged, onNavigateToReceiptItems, onNavigateToReceiptScan }: GroupDetailPageProps) {
+  const { user, virtualCards } = useAuth();
   const [showMenu, setShowMenu] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
@@ -46,18 +98,35 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   
   const [splitMode, setSplitMode] = useState<'even' | 'item'>(receiptData ? 'item' : 'even');
   const [tipPercentage, setTipPercentage] = useState(15);
+  const cachedForInit = groupId ? getCachedGroupDetail(groupId) : null;
+  const [serverSplitModePreference, setServerSplitModePreference] = useState<string | null>(cachedForInit?.splitModePreference ?? null);
   const [hasReceipt, setHasReceipt] = useState(false);
   const [receiptTotal, setReceiptTotal] = useState(0);
   const [settlingPayment, setSettlingPayment] = useState(false);
   
   const hasSelectedItems = itemSplitData.hasSelectedItems;
-  const yourItemsTotal = itemSplitData.yourItemsTotal;
+  const yourItemsSubtotal = itemSplitData.yourItemsTotal;
+  const receiptTotalFromReceipt = itemSplitData.receiptTotal;
+  const itemsSubtotal = itemSplitData.subtotal ?? yourItemsSubtotal;
+  const tax = (receiptTotalFromReceipt != null && itemsSubtotal > 0 && receiptTotalFromReceipt >= itemsSubtotal)
+    ? receiptTotalFromReceipt - itemsSubtotal
+    : 0;
+  const taxRatio = itemsSubtotal > 0 ? tax / itemsSubtotal : 0;
+  const yourTaxShare = yourItemsSubtotal * taxRatio;
+  const yourItemsTotal = yourItemsSubtotal + yourTaxShare;
   
   useEffect(() => {
     if (receiptData && receiptData.members.length > 0) {
       setSplitMode('item');
     }
   }, [receiptData]);
+
+  // Sync splitMode from server preference (so all members see host's choice)
+  useEffect(() => {
+    if (serverSplitModePreference && !receiptData) {
+      setSplitMode(serverSplitModePreference as 'even' | 'item');
+    }
+  }, [serverSplitModePreference, receiptData]);
   
   const isDark = theme === 'dark';
 
@@ -66,7 +135,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   // Use shared prefetch cache - data may already be available from App.tsx prefetch
   const cached = groupId ? getCachedGroupDetail(groupId) : null;
 
-  const [realMembers, setRealMembers] = useState<{ id: string; name: string; email: string }[]>(
+  const [realMembers, setRealMembers] = useState<{ id: string; name: string; email: string; avatarUrl?: string }[]>(
     cached?.members ?? []
   );
   const [realCreatedBy, setRealCreatedBy] = useState<string>(
@@ -78,6 +147,14 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const [inviteToken, setInviteToken] = useState<string | null>(
     cached?.inviteToken ?? null
   );
+  const [lastSettledAt, setLastSettledAt] = useState<string | null>(null);
+  const [lastSettledAllocations, setLastSettledAllocations] = useState<{ user_id: string; name: string; amount: number }[]>([]);
+  const [supportCode, setSupportCode] = useState<string | null>(null);
+  const [cardLastFour, setCardLastFour] = useState<string | null>(null);
+  const [receiptDetail, setReceiptDetail] = useState<{ items: { id: string; name: string; price: number }[]; claims: Record<string, string[]>; members: { id: string; name: string }[] } | null>(null);
+
+  const latestPendingReceipt = realReceipts.find((r: any) => r.status === 'pending');
+  const hasPendingReceipt = !!latestPendingReceipt;
 
   // Track which groupId we've loaded for, to avoid double-fetching
   const loadedGroupRef = useRef<string | null>(null);
@@ -94,6 +171,11 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       setRealCreatedBy(freshCache.createdBy);
       setInviteToken(freshCache.inviteToken);
       setRealReceipts(freshCache.receipts);
+      setLastSettledAt(freshCache.lastSettledAt ?? null);
+      setLastSettledAllocations(freshCache.lastSettledAllocations ?? []);
+      setSupportCode(freshCache.supportCode ?? null);
+      setCardLastFour(freshCache.cardLastFour ?? null);
+      setServerSplitModePreference(freshCache.splitModePreference ?? null);
       const latestCached = freshCache.receipts.find((r: any) => r.total != null);
       if (latestCached?.total) {
         setReceiptTotal(latestCached.total);
@@ -114,6 +196,11 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setRealMembers(groupData.members);
         setRealCreatedBy(groupData.created_by);
         setInviteToken(groupData.inviteToken);
+        setLastSettledAt((groupData as { lastSettledAt?: string | null }).lastSettledAt ?? null);
+        setLastSettledAllocations((groupData as { lastSettledAllocations?: { user_id: string; name: string; amount: number }[] }).lastSettledAllocations ?? []);
+        setSupportCode((groupData as { supportCode?: string | null }).supportCode ?? null);
+        setCardLastFour(groupData.cardLastFour ?? null);
+        setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
       }
       const receipts = receiptsData ?? [];
       setRealReceipts(receipts);
@@ -124,17 +211,51 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       }
       // Store in shared cache
       if (groupData) {
+        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
         setCachedGroupDetail(groupId, {
           members: groupData.members,
           createdBy: groupData.created_by,
           inviteToken: groupData.inviteToken,
           receipts,
+          lastSettledAt: g.lastSettledAt ?? null,
+          lastSettledAllocations: g.lastSettledAllocations,
+          supportCode: g.supportCode ?? null,
+          cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
+          splitModePreference: g.splitModePreference ?? 'item',
         });
       }
     });
   }, [groupId]);
 
+  // Poll for updates so members see host's split mode changes
+  useEffect(() => {
+    if (!groupId) return;
+    const interval = setInterval(() => {
+      api.groups.get(groupId).then((groupData) => {
+        setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
+      }).catch(() => {});
+    }, 15000); // every 15 seconds
+    return () => clearInterval(interval);
+  }, [groupId]);
+
+  // Fetch receipt detail (items + claims) for pending receipt to show member selections
+  useEffect(() => {
+    if (!latestPendingReceipt?.id || !groupId) {
+      setReceiptDetail(null);
+      return;
+    }
+    api.receipts.get(latestPendingReceipt.id).then((data: any) => {
+      setReceiptDetail({ items: data.items ?? [], claims: data.claims ?? {}, members: data.members ?? [] });
+    }).catch(() => setReceiptDetail(null));
+  }, [latestPendingReceipt?.id, groupId]);
+
   const isCreator = realCreatedBy ? realCreatedBy === user?.id : currentGroup?.createdBy === currentUserId;
+  // When pending receipt exists, non-hosts are locked to item split; host can always choose
+  const splitModeLocked = hasPendingReceipt && !isCreator;
+  const effectiveSplitMode = splitModeLocked ? 'item' : splitMode;
+
+  // Post-purchase view-only: when transaction was settled, show confirmation (no add receipt)
+  const isViewOnly = !!lastSettledAt;
 
   // Build member avatars from real data
   const memberAvatars = realMembers.length > 0
@@ -147,22 +268,21 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           initials,
           color: AVATAR_COLORS[i % AVATAR_COLORS.length],
           _realId: m.id,
+          avatarUrl: m.avatarUrl ?? (isMe ? (user as { avatarUrl?: string })?.avatarUrl : undefined),
         };
       })
-    : [{ id: 1, name: 'You', initials: 'ME', color: AVATAR_COLORS[0], _realId: user?.id ?? '' }];
+    : [{ id: 1, name: 'You', initials: 'ME', color: AVATAR_COLORS[0], _realId: user?.id ?? '', avatarUrl: (user as { avatarUrl?: string })?.avatarUrl }];
 
   const visibleAvatars = memberAvatars.slice(0, 3);
   const remainingCount = Math.max(0, memberAvatars.length - 3);
 
-  const tipAmount = splitMode === 'even' 
-    ? (receiptTotal * tipPercentage / 100)
-    : (yourItemsTotal * tipPercentage / 100);
+  const billBeforeTipForYou = effectiveSplitMode === 'even' ? receiptTotal : yourItemsTotal;
+  const tipAmount = billBeforeTipForYou * tipPercentage / 100;
   
-  const totalWithTip = splitMode === 'even'
+  const totalWithTip = effectiveSplitMode === 'even'
     ? receiptTotal + tipAmount
     : yourItemsTotal + tipAmount;
-  
-  const yourShare = splitMode === 'even'
+  const yourShare = effectiveSplitMode === 'even'
     ? (memberAvatars.length > 0 ? totalWithTip / memberAvatars.length : totalWithTip)
     : totalWithTip;
 
@@ -228,10 +348,18 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   };
 
   const handleAddReceipt = () => {
-    if (splitMode === 'even') {
-      setHasReceipt(true);
-    } else {
-      onNavigate('receiptScan', groupId!);
+    if (!groupId || !isCreator) return;
+    onNavigateToReceiptScan?.(groupId, splitMode === 'even');
+  };
+
+  const handleSplitModeChange = (mode: 'even' | 'item') => {
+    setSplitMode(mode);
+    if (groupId && isCreator) {
+      api.groups.updateSplitModePreference(groupId, mode).then(() => {
+        setServerSplitModePreference(mode);
+        invalidateGroupCache(groupId);
+        onGroupsChanged?.();
+      }).catch(() => {});
     }
   };
 
@@ -240,7 +368,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
     setSettlingPayment(true);
     try {
       // Create a transaction on the backend
-      const splitModeApi = splitMode === 'even' ? 'EVEN_SPLIT' : 'FULL_CONTROL';
+      const splitModeApi = effectiveSplitMode === 'even' ? 'EVEN_SPLIT' : 'FULL_CONTROL';
       const tx = await api.transactions.create(groupId, splitModeApi);
       
       // Set tip
@@ -249,7 +377,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       }
       
       // If even split with a known subtotal, set it
-      if (splitMode === 'even' && receiptTotal > 0) {
+      if (effectiveSplitMode === 'even' && receiptTotal > 0) {
         await api.transactions.setSubtotal(tx.id, receiptTotal).catch(() => {});
       }
       
@@ -353,7 +481,41 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           )}
         </div>
 
-        {/* Split Mode Toggle */}
+        {/* Support code for support tickets */}
+        {supportCode && (
+          <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-2`}>
+            Support ID: <span className="font-mono font-semibold">{supportCode}</span>
+          </p>
+        )}
+
+        {/* Virtual card - links to card details */}
+        {(cardLastFour || virtualCards.some(c => c.groupId === groupId)) && (
+          <button
+            onClick={() => onNavigate('cardDetails', groupId ?? undefined)}
+            className={`w-full mt-3 rounded-2xl p-4 flex items-center justify-between ${isDark ? 'bg-slate-700/80' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} active:scale-[0.99] transition-transform`}
+          >
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isDark ? 'bg-slate-600' : 'bg-white/80'}`}>
+                <CreditCard size={24} className={isDark ? 'text-white' : 'text-purple-600'} />
+              </div>
+              <div className="text-left">
+                <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Virtual Group Card</p>
+                <p className={`text-xs font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  •••• •••• •••• {cardLastFour ?? virtualCards.find(c => c.groupId === groupId)?.cardLastFour ?? '----'}
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Balance</p>
+              <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                ${(virtualCards.find(c => c.groupId === groupId)?.groupTotal ?? 0).toFixed(2)}
+              </p>
+            </div>
+          </button>
+        )}
+
+        {/* Split Mode Toggle - hidden when view-only or when pending receipt (locked to item split) */}
+        {!isViewOnly && !splitModeLocked && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -361,7 +523,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-100/80'} rounded-[16px] p-1 flex gap-1`}
         >
           <button
-            onClick={() => setSplitMode('even')}
+            onClick={() => handleSplitModeChange('even')}
             className={`flex-1 py-2.5 rounded-[12px] font-semibold text-[15px] transition-all ${
               splitMode === 'even'
                 ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
@@ -371,7 +533,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             Split Evenly
           </button>
           <button
-            onClick={() => setSplitMode('item')}
+            onClick={() => handleSplitModeChange('item')}
             className={`flex-1 py-2.5 rounded-[12px] font-semibold text-[15px] transition-all ${
               splitMode === 'item'
                 ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
@@ -381,10 +543,39 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             Item Split
           </button>
         </motion.div>
+        )}
       </motion.div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-5 py-5">
+        {/* Post-purchase confirmation (view-only) */}
+        {isViewOnly && (
+          <motion.div
+            initial={{ y: 8, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-6 shadow-lg border mb-5`}
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                <Check size={24} className="text-green-600" />
+              </div>
+              <div>
+                <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Payment Complete</h3>
+                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Everyone has been charged</p>
+              </div>
+            </div>
+            <h4 className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'} mb-3`}>What each person paid</h4>
+            <div className="space-y-3">
+              {lastSettledAllocations.map((a) => (
+                <div key={a.user_id} className="flex justify-between items-center">
+                  <span className={isDark ? 'text-white' : 'text-slate-800'}>{a.name}</span>
+                  <span className="font-bold text-green-600">${a.amount.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+
         {/* Members with Invite Button */}
         <motion.div
           initial={{ y: 10, opacity: 0 }}
@@ -400,10 +591,14 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 {visibleAvatars.map((avatar, index) => (
                   <div
                     key={avatar.id}
-                    className={`w-10 h-10 rounded-full bg-gradient-to-br ${avatar.color} flex items-center justify-center text-white text-xs font-bold shadow-lg border-2 ${isDark ? 'border-slate-800' : 'border-white'}`}
+                    className={`w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br ${avatar.color} flex items-center justify-center text-white text-xs font-bold shadow-lg border-2 ${isDark ? 'border-slate-800' : 'border-white'}`}
                     style={{ marginLeft: index > 0 ? '-12px' : '0', zIndex: visibleAvatars.length - index }}
                   >
-                    {avatar.initials}
+                    {avatar.avatarUrl ? (
+                      <img src={assetUrl(avatar.avatarUrl)} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      avatar.initials
+                    )}
                   </div>
                 ))}
                 {remainingCount > 0 && (
@@ -424,6 +619,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 </p>
               </div>
             </button>
+            {!isViewOnly && (
             <button 
               onClick={() => setShowInviteSheet(true)}
               className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm shadow-lg shadow-purple-500/30 active:scale-95 transition-transform"
@@ -431,6 +627,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
               <UserPlus size={16} strokeWidth={2.5} />
               Invite
             </button>
+            )}
           </div>
 
           {/* Members Dropdown */}
@@ -463,9 +660,13 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                           className={`flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-gray-50'} transition-colors border-b ${isDark ? 'border-slate-700/50' : 'border-gray-100'} last:border-0`}
                         >
                           <div
-                            className={`w-10 h-10 rounded-full bg-gradient-to-br ${member.color} flex items-center justify-center text-white text-xs font-bold shadow-md`}
+                            className={`w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br ${member.color} flex items-center justify-center text-white text-xs font-bold shadow-md`}
                           >
-                            {member.initials}
+                            {member.avatarUrl ? (
+                              <img src={assetUrl(member.avatarUrl)} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              member.initials
+                            )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'} text-sm truncate`}>
@@ -500,9 +701,10 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           </AnimatePresence>
         </motion.div>
 
-        {/* Split Evenly Mode */}
+        {/* Split Evenly Mode - hidden when view-only */}
+        {!isViewOnly && (
         <AnimatePresence mode="wait">
-          {splitMode === 'even' && (
+          {effectiveSplitMode === 'even' && (
             <motion.div
               key="even"
               initial={{ opacity: 0, x: -10 }}
@@ -521,17 +723,19 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     <Receipt size={28} className="text-purple-600" />
                   </div>
                   <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>
-                    Add a Receipt
+                    {isCreator ? 'Add a Receipt' : 'Waiting for Receipt'}
                   </h3>
                   <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
-                    Upload your receipt to split the bill evenly among all members
+                    {isCreator ? 'Upload your receipt to split the bill evenly among all members' : 'Only the group host can add a receipt'}
                   </p>
-                  <button
-                    onClick={handleAddReceipt}
-                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
-                  >
-                    Add Receipt
-                  </button>
+                  {isCreator && (
+                    <button
+                      onClick={handleAddReceipt}
+                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                    >
+                      Add Receipt
+                    </button>
+                  )}
                 </motion.div>
               ) : (
                 <>
@@ -646,7 +850,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           )}
 
           {/* Item Split Mode */}
-          {splitMode === 'item' && (
+          {effectiveSplitMode === 'item' && (
             <motion.div
               key="item"
               initial={{ opacity: 0, x: 10 }}
@@ -654,7 +858,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
               exit={{ opacity: 0, x: -10 }}
               transition={{ duration: 0.15 }}
             >
-              {!hasSelectedItems ? (
+              {hasPendingReceipt && !hasSelectedItems ? (
                 <motion.div
                   initial={{ y: 8, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
@@ -666,14 +870,42 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                   </div>
                   <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Select Your Items</h3>
                   <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
-                    Upload receipt and choose what you ordered to split by item
+                    A receipt has been uploaded. Choose what you ordered to split by item.
                   </p>
                   <button
-                    onClick={handleAddReceipt}
+                    onClick={() => groupId && latestPendingReceipt && onNavigateToReceiptItems?.(groupId, latestPendingReceipt.id)}
                     className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
                   >
-                    Scan Receipt
+                    Select Your Items
                   </button>
+                  {receiptDetail && receiptDetail.items.length > 0 && (
+                    <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} isDark={isDark} />
+                  )}
+                </motion.div>
+              ) : !hasPendingReceipt ? (
+                <motion.div
+                  initial={{ y: 8, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
+                >
+                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
+                    <Receipt size={28} className="text-indigo-600" />
+                  </div>
+                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>
+                    {isCreator ? 'Upload a Receipt' : 'Waiting for Receipt'}
+                  </h3>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                    {isCreator ? 'Upload your receipt and choose what you ordered to split by item' : 'The group creator needs to upload a receipt first'}
+                  </p>
+                  {isCreator && (
+                    <button
+                      onClick={handleAddReceipt}
+                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                    >
+                      Scan Receipt
+                    </button>
+                  )}
                 </motion.div>
               ) : (
                 <>
@@ -693,7 +925,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Your items from receipt</p>
                       </div>
                       <button
-                        onClick={() => onNavigate('receiptItems')}
+                        onClick={() => groupId && latestPendingReceipt && onNavigateToReceiptItems?.(groupId, latestPendingReceipt.id)}
                         className="text-violet-600 font-semibold text-sm"
                       >
                         Edit
@@ -703,8 +935,14 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     <div className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-50'} rounded-[16px] p-4 space-y-2`}>
                       <div className="flex justify-between items-center">
                         <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Your Items</span>
-                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${yourItemsTotal.toFixed(2)}</span>
+                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${yourItemsSubtotal.toFixed(2)}</span>
                       </div>
+                      {yourTaxShare > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Tax</span>
+                          <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${yourTaxShare.toFixed(2)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between items-center">
                         <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Tip ({tipPercentage}%)</span>
                         <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${tipAmount.toFixed(2)}</span>
@@ -716,6 +954,9 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         </div>
                       </div>
                     </div>
+                    {receiptDetail && receiptDetail.items.length > 0 && (
+                      <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} isDark={isDark} />
+                    )}
                   </motion.div>
 
                   {/* Tip Slider */}
@@ -781,6 +1022,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             </motion.div>
           )}
         </AnimatePresence>
+        )}
 
         {/* Transaction History */}
         {baseGroup.transactions.length > 0 && (

@@ -16,6 +16,7 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught exception (server stays up):', err?.message || err);
 });
 
+import fs from 'fs';
 import { authRouter } from './routes/auth.js';
 import { usersRouter } from './routes/users.js';
 import { bootstrapRouter } from './routes/bootstrap.js';
@@ -30,6 +31,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Ensure uploads dirs exist before handling requests
+const uploadsBase = path.join(__dirname, '../uploads');
+const avatarsDir = path.join(uploadsBase, 'avatars');
+if (!fs.existsSync(avatarsDir)) {
+  fs.mkdirSync(avatarsDir, { recursive: true });
+  console.log('Created uploads dir:', avatarsDir);
+}
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
@@ -66,13 +75,20 @@ app.use('/api/receipts', receiptsRouter);
 app.use('/api/transactions', transactionsRouter);
 
 // Global error handler - prevents unhandled rejections from crashing the server
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error & { code?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const msg = err instanceof Error ? err.message : 'Internal server error';
-  if (msg.includes('PNG or JPG')) {
+  if (msg.includes('Please upload')) {
     return res.status(400).json({ error: msg });
   }
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ error: 'File too large. Profile photos must be under 10MB.' });
+  }
   console.error('Unhandled error:', err);
-  res.status(500).json({ error: msg });
+  const showDebug = process.env.NODE_ENV !== 'production' || process.env.DEBUG_ERRORS === '1';
+  res.status(500).json({
+    error: msg,
+    ...(showDebug && { debug: String((err as Error).stack || err) }),
+  });
 });
 
 // Health check: DB connectivity
