@@ -40,7 +40,11 @@ if (!fs.existsSync(avatarsDir)) {
   console.log('Created uploads dir:', avatarsDir);
 }
 
-app.use(cors({ origin: true, credentials: true }));
+// In production, use explicit FRONTEND_URL for CORS so preflight is fast and secure
+const corsOrigin = process.env.NODE_ENV === 'production' && process.env.FRONTEND_URL
+  ? process.env.FRONTEND_URL
+  : true;
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(cookieParser());
 app.use(express.json());
 

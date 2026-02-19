@@ -66,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     api
-      .bootstrap()
+      .bootstrap({ noRefreshOn401: true })
       .then(applyBootstrap)
       .catch((err) => {
         const msg = err instanceof Error ? err.message : '';
