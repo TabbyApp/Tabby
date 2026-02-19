@@ -15,7 +15,12 @@ async function migrate() {
   if (!conn) {
     throw new Error('DATABASE_URL is required');
   }
-  const client = new pg.Client({ connectionString: conn });
+  // Supabase and some hosts use SSL certs Node doesn't trust by default; match main db.ts behavior
+  const needRelaxedSSL = process.env.PGSSLMODE === 'require' || conn.includes('supabase');
+  const client = new pg.Client({
+    connectionString: conn,
+    ssl: needRelaxedSSL ? { rejectUnauthorized: false } : undefined,
+  });
   await client.connect();
 
   try {
