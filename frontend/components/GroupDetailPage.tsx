@@ -149,12 +149,17 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   );
   const [lastSettledAt, setLastSettledAt] = useState<string | null>(null);
   const [lastSettledAllocations, setLastSettledAllocations] = useState<{ user_id: string; name: string; amount: number }[]>([]);
+  const [lastSettledBreakdown, setLastSettledBreakdown] = useState<Record<string, { subtotal: number; tax: number; tip: number }> | null>(null);
+  const [lastSettledItemsPerUser, setLastSettledItemsPerUser] = useState<Record<string, { name: string; price: number }[]> | null>(null);
   const [supportCode, setSupportCode] = useState<string | null>(null);
   const [cardLastFour, setCardLastFour] = useState<string | null>(null);
   const [receiptDetail, setReceiptDetail] = useState<{ items: { id: string; name: string; price: number }[]; claims: Record<string, string[]>; members: { id: string; name: string }[] } | null>(null);
 
   const latestPendingReceipt = realReceipts.find((r: any) => r.status === 'pending');
   const hasPendingReceipt = !!latestPendingReceipt;
+  // After item-split confirm, receipt becomes 'completed' so use latest completed receipt without transaction for Edit
+  const latestCompletedReceiptNoTx = realReceipts.find((r: any) => r.status === 'completed' && !r.transaction_id);
+  const receiptForItemSplit = latestPendingReceipt ?? latestCompletedReceiptNoTx;
 
   // Track which groupId we've loaded for, to avoid double-fetching
   const loadedGroupRef = useRef<string | null>(null);
@@ -173,6 +178,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       setRealReceipts(freshCache.receipts);
       setLastSettledAt(freshCache.lastSettledAt ?? null);
       setLastSettledAllocations(freshCache.lastSettledAllocations ?? []);
+      setLastSettledBreakdown((freshCache as { lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }> }).lastSettledBreakdown ?? null);
+      setLastSettledItemsPerUser((freshCache as { lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]> }).lastSettledItemsPerUser ?? null);
       setSupportCode(freshCache.supportCode ?? null);
       setCardLastFour(freshCache.cardLastFour ?? null);
       setServerSplitModePreference(freshCache.splitModePreference ?? null);
@@ -198,6 +205,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setInviteToken(groupData.inviteToken);
         setLastSettledAt((groupData as { lastSettledAt?: string | null }).lastSettledAt ?? null);
         setLastSettledAllocations((groupData as { lastSettledAllocations?: { user_id: string; name: string; amount: number }[] }).lastSettledAllocations ?? []);
+        setLastSettledBreakdown((groupData as { lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }> }).lastSettledBreakdown ?? null);
+        setLastSettledItemsPerUser((groupData as { lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]> }).lastSettledItemsPerUser ?? null);
         setSupportCode((groupData as { supportCode?: string | null }).supportCode ?? null);
         setCardLastFour(groupData.cardLastFour ?? null);
         setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
@@ -211,7 +220,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       }
       // Store in shared cache
       if (groupData) {
-        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
+        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
         setCachedGroupDetail(groupId, {
           members: groupData.members,
           createdBy: groupData.created_by,
@@ -219,6 +228,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           receipts,
           lastSettledAt: g.lastSettledAt ?? null,
           lastSettledAllocations: g.lastSettledAllocations,
+          lastSettledBreakdown: g.lastSettledBreakdown,
+          lastSettledItemsPerUser: g.lastSettledItemsPerUser,
           supportCode: g.supportCode ?? null,
           cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
           splitModePreference: g.splitModePreference ?? 'item',
@@ -226,6 +237,17 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       }
     });
   }, [groupId]);
+
+  // If view-only but breakdown missing (e.g. from batch cache), refetch once to get full settlement breakdown
+  useEffect(() => {
+    if (!groupId || !lastSettledAt || lastSettledAllocations.length === 0) return;
+    if (lastSettledBreakdown != null) return;
+    api.groups.get(groupId).then((groupData) => {
+      const g = groupData as { lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]> };
+      if (g.lastSettledBreakdown) setLastSettledBreakdown(g.lastSettledBreakdown);
+      if (g.lastSettledItemsPerUser) setLastSettledItemsPerUser(g.lastSettledItemsPerUser);
+    }).catch(() => {});
+  }, [groupId, lastSettledAt, lastSettledAllocations.length, lastSettledBreakdown]);
 
   // Poll for updates so members see host's split mode changes
   useEffect(() => {
@@ -367,13 +389,16 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
     if (!groupId || settlingPayment) return;
     setSettlingPayment(true);
     try {
-      // Create a transaction on the backend
+      // Create a transaction on the backend. For item split, link the existing completed receipt.
       const splitModeApi = effectiveSplitMode === 'even' ? 'EVEN_SPLIT' : 'FULL_CONTROL';
-      const tx = await api.transactions.create(groupId, splitModeApi);
+      const receiptIdForTx = effectiveSplitMode === 'item' ? receiptForItemSplit?.id : undefined;
+      const tx = await api.transactions.create(groupId, splitModeApi, receiptIdForTx);
       
-      // Set tip
-      if (tipPercentage > 0) {
-        await api.transactions.setTip(tx.id, tipAmount);
+      // Set tip: host's percentage (e.g. 15%) applies to the full bill, so everyone pays 15% of their amount
+      const fullBillBeforeTip = receiptTotal > 0 ? receiptTotal : (effectiveSplitMode === 'item' ? (receiptTotalFromReceipt ?? 0) : 0);
+      if (tipPercentage > 0 && fullBillBeforeTip > 0) {
+        const totalTipAmount = fullBillBeforeTip * tipPercentage / 100;
+        await api.transactions.setTip(tx.id, totalTipAmount);
       }
       
       // If even split with a known subtotal, set it
@@ -565,13 +590,53 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
               </div>
             </div>
             <h4 className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'} mb-3`}>What each person paid</h4>
-            <div className="space-y-3">
-              {lastSettledAllocations.map((a) => (
-                <div key={a.user_id} className="flex justify-between items-center">
-                  <span className={isDark ? 'text-white' : 'text-slate-800'}>{a.name}</span>
-                  <span className="font-bold text-green-600">${a.amount.toFixed(2)}</span>
-                </div>
-              ))}
+            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-3`}>Tip is split by the host’s choice; tax is proportional to what you ordered.</p>
+            <div className="space-y-4">
+              {lastSettledAllocations.map((a) => {
+                const breakdown = lastSettledBreakdown?.[a.user_id];
+                const items = lastSettledItemsPerUser?.[a.user_id];
+                return (
+                  <div key={a.user_id} className={`rounded-xl p-4 ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+                    <div className="flex justify-between items-center mb-2">
+                      <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{a.name}</span>
+                      <span className="font-bold text-green-600">${a.amount.toFixed(2)}</span>
+                    </div>
+                    {breakdown && (
+                      <div className={`text-xs space-y-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        <div className="flex justify-between">
+                          <span>Items</span>
+                          <span>${breakdown.subtotal.toFixed(2)}</span>
+                        </div>
+                        {(breakdown.tax ?? 0) > 0 && (
+                          <div className="flex justify-between">
+                            <span>Tax (proportional)</span>
+                            <span>${breakdown.tax.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {(breakdown.tip ?? 0) > 0 && (
+                          <div className="flex justify-between">
+                            <span>Tip</span>
+                            <span>${breakdown.tip.toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {items && items.length > 0 && (
+                      <div className={`mt-2 pt-2 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
+                        <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-1`}>Selected items</p>
+                        <ul className={`text-xs space-y-0.5 ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
+                          {items.map((it, i) => (
+                            <li key={i} className="flex justify-between">
+                              <span className="truncate pr-2">{it.name}</span>
+                              <span>${it.price.toFixed(2)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </motion.div>
         )}
@@ -858,58 +923,9 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
               exit={{ opacity: 0, x: -10 }}
               transition={{ duration: 0.15 }}
             >
-              {hasPendingReceipt && !hasSelectedItems ? (
-                <motion.div
-                  initial={{ y: 8, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.15 }}
-                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
-                >
-                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
-                    <Receipt size={28} className="text-indigo-600" />
-                  </div>
-                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Select Your Items</h3>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
-                    A receipt has been uploaded. Choose what you ordered to split by item.
-                  </p>
-                  <button
-                    onClick={() => groupId && latestPendingReceipt && onNavigateToReceiptItems?.(groupId, latestPendingReceipt.id)}
-                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
-                  >
-                    Select Your Items
-                  </button>
-                  {receiptDetail && receiptDetail.items.length > 0 && (
-                    <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} isDark={isDark} />
-                  )}
-                </motion.div>
-              ) : !hasPendingReceipt ? (
-                <motion.div
-                  initial={{ y: 8, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.15 }}
-                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
-                >
-                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
-                    <Receipt size={28} className="text-indigo-600" />
-                  </div>
-                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>
-                    {isCreator ? 'Upload a Receipt' : 'Waiting for Receipt'}
-                  </h3>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
-                    {isCreator ? 'Upload your receipt and choose what you ordered to split by item' : 'The group creator needs to upload a receipt first'}
-                  </p>
-                  {isCreator && (
-                    <button
-                      onClick={handleAddReceipt}
-                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
-                    >
-                      Scan Receipt
-                    </button>
-                  )}
-                </motion.div>
-              ) : (
+              {hasSelectedItems ? (
                 <>
-                  {/* Selected Items Summary */}
+                  {/* Selected Items Summary + Tip + Complete (show after item-split confirm even though receipt is now 'completed') */}
                   <motion.div
                     initial={{ y: 6, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
@@ -924,12 +940,14 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-lg`}>Items Selected</p>
                         <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Your items from receipt</p>
                       </div>
-                      <button
-                        onClick={() => groupId && latestPendingReceipt && onNavigateToReceiptItems?.(groupId, latestPendingReceipt.id)}
-                        className="text-violet-600 font-semibold text-sm"
-                      >
-                        Edit
-                      </button>
+                      {receiptForItemSplit && (
+                        <button
+                          onClick={() => groupId && onNavigateToReceiptItems?.(groupId, receiptForItemSplit.id)}
+                          className="text-violet-600 font-semibold text-sm"
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
 
                     <div className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-50'} rounded-[16px] p-4 space-y-2`}>
@@ -954,12 +972,9 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         </div>
                       </div>
                     </div>
-                    {receiptDetail && receiptDetail.items.length > 0 && (
-                      <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} isDark={isDark} />
-                    )}
                   </motion.div>
 
-                  {/* Tip Slider */}
+                  {/* Tip Slider - Item Split */}
                   <motion.div
                     initial={{ y: 6, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
@@ -1006,7 +1021,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     </div>
                   </motion.div>
 
-                  {/* Complete Payment Button */}
+                  {/* Complete Payment Button - Item Split */}
                   <motion.button
                     initial={{ y: 6, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
@@ -1018,6 +1033,55 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     {settlingPayment ? 'Processing...' : `Complete Payment • $${totalWithTip.toFixed(2)}`}
                   </motion.button>
                 </>
+              ) : hasPendingReceipt ? (
+                <motion.div
+                  initial={{ y: 8, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
+                >
+                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
+                    <Receipt size={28} className="text-indigo-600" />
+                  </div>
+                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Select Your Items</h3>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                    A receipt has been uploaded. Choose what you ordered to split by item.
+                  </p>
+                  <button
+                    onClick={() => groupId && latestPendingReceipt && onNavigateToReceiptItems?.(groupId, latestPendingReceipt.id)}
+                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                  >
+                    Select Your Items
+                  </button>
+                  {receiptDetail && receiptDetail.items.length > 0 && (
+                    <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} isDark={isDark} />
+                  )}
+                </motion.div>
+              ) : (
+                <motion.div
+                  initial={{ y: 8, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ duration: 0.15 }}
+                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
+                >
+                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
+                    <Receipt size={28} className="text-indigo-600" />
+                  </div>
+                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>
+                    {isCreator ? 'Upload a Receipt' : 'Waiting for Receipt'}
+                  </h3>
+                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                    {isCreator ? 'Upload your receipt and choose what you ordered to split by item' : 'The group creator needs to upload a receipt first'}
+                  </p>
+                  {isCreator && (
+                    <button
+                      onClick={handleAddReceipt}
+                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                    >
+                      Scan Receipt
+                    </button>
+                  )}
+                </motion.div>
               )}
             </motion.div>
           )}

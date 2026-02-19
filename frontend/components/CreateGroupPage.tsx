@@ -19,6 +19,7 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
   const [emailInput, setEmailInput] = useState('');
   const [step, setStep] = useState<'create' | 'success'>('create');
   const [groupLink, setGroupLink] = useState('');
+  const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
@@ -40,12 +41,10 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
       setError('');
       try {
         const result = await api.groups.create(groupName, members.length > 0 ? members : undefined);
-        const detail = await api.groups.get(result.id);
-        if (detail.inviteToken) {
-          setGroupLink(`${window.location.origin}/join/${detail.inviteToken}`);
-        } else {
-          setGroupLink(`${window.location.origin}/groups/${result.id}`);
-        }
+        setCreatedGroupId(result.id);
+        // Same invite link format as GroupDetailPage: /join/:inviteToken
+        const token = result.inviteToken ?? (await api.groups.get(result.id)).inviteToken;
+        setGroupLink(token ? `${window.location.origin}/join/${token}` : `${window.location.origin}/groups/${result.id}`);
         // Refresh the groups list in App.tsx
         onGroupCreated?.();
         setStep('success');
@@ -110,6 +109,9 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
           </motion.div>
 
           <motion.button initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.12 }} onClick={shareLink} className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-2xl font-semibold active:scale-[0.98] transition-transform shadow-xl mb-3">Share Link</motion.button>
+          {createdGroupId && (
+            <motion.button initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.12 }} onClick={() => onNavigate('groupDetail', createdGroupId)} className={`w-full ${isDark ? 'bg-slate-800 text-white border border-slate-600' : 'bg-white text-slate-800 border border-slate-200'} py-4 rounded-2xl font-semibold active:scale-[0.98] transition-transform mb-3`}>Go to group</motion.button>
+          )}
           <motion.button initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.12 }} onClick={() => onNavigate('groups')} className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700'} py-4 rounded-2xl font-semibold active:scale-[0.98] transition-transform`}>View All Groups</motion.button>
         </motion.div>
       </div>
