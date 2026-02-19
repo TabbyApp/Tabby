@@ -99,13 +99,28 @@ export default function App() {
 
   const unreadNotificationCount = notifications.filter(n => !n.read).length;
 
-  // Parse /join/:token from URL on load (invite links)
+  // Parse /join/:token from URL on load (invite links). Persist so it survives login redirect/reload on deploy.
+  const JOIN_TOKEN_KEY = 'tabby_join_token';
   useEffect(() => {
     const m = window.location.pathname.match(/^\/join\/([a-f0-9]+)$/i);
     if (m?.[1]) {
-      setPendingInviteToken(m[1]);
+      const token = m[1];
+      setPendingInviteToken(token);
+      try {
+        sessionStorage.setItem(JOIN_TOKEN_KEY, token);
+      } catch {}
       window.history.replaceState({}, '', '/');
+    } else {
+      const stored = sessionStorage.getItem(JOIN_TOKEN_KEY);
+      if (stored) setPendingInviteToken(stored);
     }
+  }, []);
+
+  const clearPendingInviteToken = useCallback(() => {
+    setPendingInviteToken(null);
+    try {
+      sessionStorage.removeItem(JOIN_TOKEN_KEY);
+    } catch {}
   }, []);
 
   const handlePostAuth = useCallback(() => {
@@ -237,6 +252,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    clearPendingInviteToken();
     await logout();
     setCurrentPage('home');
     setPageHistory([]);
@@ -262,7 +278,7 @@ export default function App() {
 
   return (
     <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-black'}`}>
-      <div className={`mx-auto max-w-[430px] h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-[#F2F2F7]'} relative overflow-hidden`}>
+      <div className={`mx-auto max-w-[430px] h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-[#F2F2F7]'} relative overflow-hidden pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]`}>
         {showSplash ? (
           <SplashScreen
             onComplete={() => setSplashAnimDone(true)}
@@ -319,7 +335,7 @@ export default function App() {
                   onNavigate={handleNavigate}
                   theme={theme}
                   inviteCode={pendingInviteToken ?? undefined}
-                  onAccepted={() => { setPendingInviteToken(null); loadGroups(); }}
+                  onAccepted={() => { clearPendingInviteToken(); loadGroups(); }}
                 />
               )}
               {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
