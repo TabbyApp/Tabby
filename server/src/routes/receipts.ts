@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import convert from 'heic-convert';
 import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { processReceipt } from '../receiptProcessor.js';
@@ -17,13 +18,13 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const ALLOWED_MIMES = ['image/png', 'image/jpeg', 'image/jpg', 'image/x-png'];
+const ALLOWED_MIMES = ['image/png', 'image/jpeg', 'image/jpg', 'image/x-png', 'image/heic', 'image/heif'];
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname)?.toLowerCase() || '.jpg';
-    const safeExt = ['.png', '.jpg', '.jpeg'].includes(ext) ? ext : '.jpg';
+    const safeExt = ['.png', '.jpg', '.jpeg', '.heic', '.heif'].includes(ext) ? ext : '.jpg';
     cb(null, `${crypto.randomUUID()}${safeExt}`);
   },
 });
@@ -34,7 +35,7 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     const ok = ALLOWED_MIMES.includes(file.mimetype);
     if (ok) cb(null, true);
-    else cb(new Error('Please upload PNG or JPG'));
+    else cb(new Error('Please upload PNG, JPG, or HEIC (iPhone photos)'));
   },
 });
 
@@ -42,6 +43,24 @@ export const receiptsRouter = Router();
 
 function genId() {
   return crypto.randomUUID();
+}
+
+/** If the file is HEIC/HEIF, convert to JPEG and return the new path; otherwise return original path. */
+async function ensureJpegForOcr(heicOrJpegPath: string): Promise<{ path: string; pathUrl: string }> {
+  const ext = path.extname(heicOrJpegPath).toLowerCase();
+  if (ext !== '.heic' && ext !== '.heif') {
+    return { path: heicOrJpegPath, pathUrl: `/uploads/${path.basename(heicOrJpegPath)}` };
+  }
+  const jpegPath = path.join(path.dirname(heicOrJpegPath), path.basename(heicOrJpegPath, ext) + '.jpg');
+  const inputBuffer = fs.readFileSync(heicOrJpegPath);
+  const outputBuffer = await convert({
+    buffer: inputBuffer as unknown as ArrayBuffer,
+    format: 'JPEG',
+    quality: 0.9,
+  });
+  fs.writeFileSync(jpegPath, Buffer.from(outputBuffer));
+  fs.unlinkSync(heicOrJpegPath);
+  return { path: jpegPath, pathUrl: `/uploads/${path.basename(jpegPath)}` };
 }
 
 /** Create empty receipt for manual entry (no image) */
@@ -84,12 +103,13 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
     }
 
     const id = genId();
-    const filePath = `/uploads/${file.filename}`;
-    const fullPath = path.join(uploadsDir, file.filename);
+    let fullPath = path.join(uploadsDir, file.filename);
+    const { path: fullPathForOcr, pathUrl: filePath } = await ensureJpegForOcr(fullPath);
+    fullPath = fullPathForOcr;
     const provider = process.env.RECEIPT_OCR_PROVIDER || 'mock';
-    console.log('[Receipt] upload: receiptId=', id, 'groupId=', groupId, 'provider=', provider, 'file=', file.filename);
+    console.log('[Receipt] upload: receiptId=', id, 'groupId=', groupId, 'provider=', provider, 'file=', path.basename(fullPath));
 
-    // Insert receipt as UPLOADED first (file is already saved by multer)
+    // Insert receipt as UPLOADED first (file is already saved by multer; HEIC may have been converted to JPEG)
     await query(
       `INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status, parsed_output, confidence_map, failure_reason)
        VALUES ($1, $2, $3, $4, NULL, 'UPLOADED', NULL, NULL, NULL)`,
