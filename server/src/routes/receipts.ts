@@ -6,7 +6,9 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
-import { extractReceiptItems } from '../ocr.js';
+import { processReceipt } from '../receiptProcessor.js';
+import { validateReceipt } from '../receiptValidation.js';
+import type { ParsedReceipt } from '../ocr/types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDir = path.join(__dirname, '../../uploads');
@@ -61,7 +63,7 @@ receiptsRouter.post('/', requireAuth, async (req, res) => {
 receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, res) => {
   try {
     const { userId } = (req as any).user;
-    const { groupId, total } = req.body;
+    const { groupId } = req.body;
     const file = req.file;
 
     if (!groupId) {
@@ -81,38 +83,50 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
       return res.status(400).json({ error: 'No image file provided' });
     }
 
+    const id = genId();
+    const filePath = `/uploads/${file.filename}`;
     const fullPath = path.join(uploadsDir, file.filename);
+    const provider = process.env.RECEIPT_OCR_PROVIDER || 'mock';
+    console.log('[Receipt] upload: receiptId=', id, 'groupId=', groupId, 'provider=', provider, 'file=', file.filename);
 
-    let extraction: Awaited<ReturnType<typeof extractReceiptItems>>;
+    // Insert receipt as UPLOADED first (file is already saved by multer)
+    await query(
+      `INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status, parsed_output, confidence_map, failure_reason)
+       VALUES ($1, $2, $3, $4, NULL, 'UPLOADED', NULL, NULL, NULL)`,
+      [id, groupId, userId, filePath]
+    );
+
+    let parsed: ParsedReceipt;
+    let confidenceMap: Record<string, unknown>;
     try {
-      const ocrPromise = extractReceiptItems(fullPath);
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Couldn\'t read the image. Please try again.')), 35_000)
       );
-      extraction = await Promise.race([ocrPromise, timeout]);
+      const result = await Promise.race([processReceipt(fullPath), timeout]);
+      parsed = result.parsed;
+      confidenceMap = result.confidence as unknown as Record<string, unknown>;
     } catch (ocrErr) {
       try { fs.unlinkSync(fullPath); } catch { /* ignore */ }
-      const msg = ocrErr instanceof Error ? ocrErr.message : 'Couldn\'t read the image.';
-      console.warn('OCR failed:', msg);
+      const msg = ocrErr instanceof Error ? ocrErr.message : 'Processing failed';
+      await query(
+        'UPDATE receipts SET status = $1, failure_reason = $2 WHERE id = $3',
+        ['FAILED', msg, id]
+      );
+      console.warn('[Receipt] processing failed:', msg);
+      if (ocrErr instanceof Error && ocrErr.stack) console.warn('[Receipt] stack:', ocrErr.stack);
       return res.status(422).json({ error: 'Couldn\'t read the image. Please try again with a clearer photo.' });
     }
 
-    const { items } = extraction;
-    const ocrReceiptTotal = extraction.receiptTotal;
-    const subtotal = items.reduce((s, i) => s + Number(i.price), 0);
-    const manualTotal = total != null && String(total).trim() !== '' ? parseFloat(String(total)) : NaN;
-    const receiptTotalToStore = !Number.isNaN(manualTotal) ? manualTotal : (ocrReceiptTotal != null && ocrReceiptTotal >= subtotal ? ocrReceiptTotal : subtotal);
-
-    const id = genId();
-    const filePath = `/uploads/${file.filename}`;
-
+    const totalNum = parsed.totals.total ?? parsed.totals.subtotal ?? null;
+    console.log('[Receipt] upload success: receiptId=', id, 'totals=', parsed.totals, 'lineItemCount=', parsed.lineItems.length);
     await query(
-      'INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status) VALUES ($1, $2, $3, $4, $5, $6)',
-      [id, groupId, userId, filePath, Number.isNaN(receiptTotalToStore) ? subtotal : receiptTotalToStore, 'pending']
+      `UPDATE receipts SET status = 'NEEDS_REVIEW', parsed_output = $1, confidence_map = $2, total = $3 WHERE id = $4`,
+      [JSON.stringify(parsed), JSON.stringify(confidenceMap), totalNum, id]
     );
 
+    // Sync receipt_items from parsed for backward compatibility with claims/split UI
     let sortOrder = 0;
-    for (const item of items) {
+    for (const item of parsed.lineItems) {
       try {
         await query(
           'INSERT INTO receipt_items (id, receipt_id, name, price, sort_order) VALUES ($1, $2, $3, $4, $5)',
@@ -123,8 +137,16 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
       }
     }
 
+    const validation = validateReceipt(parsed);
+    console.log('[Receipt] upload validation:', validation.isValid ? 'OK' : 'FAIL', validation.issues?.length ? validation.issues : '');
     const { rows } = await query('SELECT * FROM receipts WHERE id = $1', [id]);
-    res.status(201).json(rows[0]);
+    const receipt = rows[0] as Record<string, unknown>;
+    res.status(201).json({
+      ...receipt,
+      parsed_output: parsed,
+      confidence_map: confidenceMap,
+      validation: { isValid: validation.isValid, issues: validation.issues, suggestedFieldsToReview: validation.suggestedFieldsToReview },
+    });
   } catch (err) {
     console.error('Upload error:', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Upload failed' });
@@ -241,7 +263,167 @@ receiptsRouter.get('/:receiptId', requireAuth, async (req, res) => {
     WHERE gm.group_id = $1
   `, [receipt.group_id]);
 
-  res.json({ ...receipt, items, claims, members });
+  let parsed_output: ParsedReceipt | null = null;
+  let confidence_map: Record<string, unknown> | null = null;
+  let final_snapshot: ParsedReceipt | null = null;
+  let validation: { isValid: boolean; issues: string[]; suggestedFieldsToReview: string[] } | null = null;
+
+  if (receipt.parsed_output && typeof receipt.parsed_output === 'string') {
+    try {
+      parsed_output = JSON.parse(receipt.parsed_output) as ParsedReceipt;
+      validation = validateReceipt(parsed_output);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (receipt.confidence_map && typeof receipt.confidence_map === 'string') {
+    try {
+      confidence_map = JSON.parse(receipt.confidence_map) as Record<string, unknown>;
+    } catch {
+      /* ignore */
+    }
+  }
+  if (receipt.final_snapshot && typeof receipt.final_snapshot === 'string') {
+    try {
+      final_snapshot = JSON.parse(receipt.final_snapshot) as ParsedReceipt;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  res.json({
+    ...receipt,
+    items,
+    claims,
+    members,
+    parsed_output: parsed_output ?? undefined,
+    confidence_map: confidence_map ?? undefined,
+    final_snapshot: final_snapshot ?? undefined,
+    validation: validation ?? undefined,
+  });
+});
+
+receiptsRouter.post('/:receiptId/confirm', requireAuth, async (req, res) => {
+  try {
+    const { userId } = (req as any).user;
+    const { receiptId } = req.params;
+    const body = req.body as ParsedReceipt;
+    console.log('[Receipt] confirm: receiptId=', receiptId);
+
+    const { rows } = await query(
+      'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = $1 AND gm.user_id = $2',
+      [receiptId, userId]
+    );
+    const receipt = rows[0] as any;
+
+    if (!receipt) {
+      return res.status(404).json({ error: 'Receipt not found' });
+    }
+
+    if (!body || !body.totals || !Array.isArray(body.lineItems)) {
+      return res.status(400).json({ error: 'Invalid receipt payload: totals and lineItems required' });
+    }
+
+    const validation = validateReceipt(body);
+    if (!validation.isValid) {
+      console.log('[Receipt] confirm rejected: validation issues=', validation.issues);
+      return res.status(400).json({ error: 'Receipt does not reconcile', validation });
+    }
+
+    const totalNum = body.totals.total ?? body.totals.subtotal ?? null;
+    console.log('[Receipt] confirm success: receiptId=', receiptId, 'totals=', body.totals, 'lineItemCount=', body.lineItems.length);
+    await query(
+      'UPDATE receipts SET status = $1, final_snapshot = $2, total = $3 WHERE id = $4',
+      ['DONE', JSON.stringify(body), totalNum, receiptId]
+    );
+
+    await query('DELETE FROM receipt_items WHERE receipt_id = $1', [receiptId]);
+    let sortOrder = 0;
+    for (const item of body.lineItems) {
+      await query(
+        'INSERT INTO receipt_items (id, receipt_id, name, price, sort_order) VALUES ($1, $2, $3, $4, $5)',
+        [genId(), receiptId, item.name, item.price, sortOrder++]
+      );
+    }
+
+    res.json({ ok: true, receipt: { id: receiptId, status: 'DONE', final_snapshot: body } });
+  } catch (err) {
+    console.error('[Receipt] confirm error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Confirm failed' });
+  }
+});
+
+receiptsRouter.post('/:receiptId/retry', requireAuth, async (req, res) => {
+  try {
+    const { userId } = (req as any).user;
+    const { receiptId } = req.params;
+    console.log('[Receipt] retry: receiptId=', receiptId);
+
+    const { rows: receiptRows } = await query(
+      'SELECT r.* FROM receipts r JOIN group_members gm ON r.group_id = gm.group_id WHERE r.id = $1 AND gm.user_id = $2',
+      [receiptId, userId]
+    );
+    const receipt = receiptRows[0] as any;
+
+    if (!receipt) {
+      return res.status(404).json({ error: 'Receipt not found' });
+    }
+
+    if (!receipt.file_path) {
+      return res.status(400).json({ error: 'No image to retry' });
+    }
+
+    const fullPath = path.join(uploadsDir, path.basename(receipt.file_path));
+    if (!fs.existsSync(fullPath)) {
+      return res.status(400).json({ error: 'Image file no longer available' });
+    }
+
+    let parsed: ParsedReceipt;
+    let confidenceMap: Record<string, unknown>;
+    try {
+      const result = await processReceipt(fullPath);
+      parsed = result.parsed;
+      confidenceMap = result.confidence as unknown as Record<string, unknown>;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Processing failed';
+      console.warn('[Receipt] retry failed: receiptId=', receiptId, msg);
+      if (err instanceof Error && err.stack) console.warn('[Receipt] retry stack:', err.stack);
+      await query(
+        'UPDATE receipts SET status = $1, failure_reason = $2, parsed_output = NULL, confidence_map = NULL WHERE id = $3',
+        ['FAILED', msg, receiptId]
+      );
+      return res.status(422).json({ error: msg });
+    }
+
+    const totalNum = parsed.totals.total ?? parsed.totals.subtotal ?? null;
+    const validation = validateReceipt(parsed);
+    console.log('[Receipt] retry success: receiptId=', receiptId, 'totals=', parsed.totals, 'lineItemCount=', parsed.lineItems.length, 'validation=', validation.isValid ? 'OK' : validation.issues);
+    await query(
+      'UPDATE receipts SET status = $1, parsed_output = $2, confidence_map = $3, total = $4, failure_reason = NULL WHERE id = $5',
+      ['NEEDS_REVIEW', JSON.stringify(parsed), JSON.stringify(confidenceMap), totalNum, receiptId]
+    );
+
+    await query('DELETE FROM receipt_items WHERE receipt_id = $1', [receiptId]);
+    let sortOrder = 0;
+    for (const item of parsed.lineItems) {
+      await query(
+        'INSERT INTO receipt_items (id, receipt_id, name, price, sort_order) VALUES ($1, $2, $3, $4, $5)',
+        [genId(), receiptId, item.name, item.price, sortOrder++]
+      );
+    }
+
+    const { rows: updatedRows } = await query('SELECT * FROM receipts WHERE id = $1', [receiptId]);
+    const updated = updatedRows[0] as Record<string, unknown>;
+    res.json({
+      ...updated,
+      parsed_output: parsed,
+      confidence_map: confidenceMap,
+      validation: { isValid: validation.isValid, issues: validation.issues, suggestedFieldsToReview: validation.suggestedFieldsToReview },
+    });
+  } catch (err) {
+    console.error('[Receipt] retry error:', err);
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Retry failed' });
+  }
 });
 
 receiptsRouter.post('/:receiptId/items', requireAuth, async (req, res) => {

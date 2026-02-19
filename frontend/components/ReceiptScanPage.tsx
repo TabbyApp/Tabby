@@ -18,6 +18,8 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadPhase, setUploadPhase] = useState<'upload' | 'processing'>('upload');
   const [error, setError] = useState('');
 
   const handleFileSelected = async (file: File) => {
@@ -27,8 +29,13 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
     }
     setUploading(true);
     setError('');
+    setUploadProgress(0);
+    setUploadPhase('upload');
     try {
-      const result = await api.receipts.upload(realGroupId, file);
+      const result = await api.receipts.uploadWithProgress(realGroupId, file, (percent, phase) => {
+        setUploadProgress(percent);
+        setUploadPhase(phase);
+      });
       onReceiptUploaded?.(result.id);
       if (returnToGroupAfterUpload) {
         onReturnToGroup?.();
@@ -40,6 +47,7 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -125,11 +133,23 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
               )}
             </div>
             <h3 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>
-              {uploading ? 'Uploading...' : 'Upload Your Receipt'}
+              {uploading
+                ? uploadPhase === 'upload'
+                  ? `Uploading... ${uploadProgress}%`
+                  : 'Processing...'
+                : 'Upload Your Receipt'}
             </h3>
-            <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'} mb-7 text-[15px]`}>
-              {uploading ? 'Processing your receipt with OCR...' : 'Take a photo or upload an existing image'}
+            <p className={`${isDark ? 'text-slate-400' : 'text-slate-500'} mb-4 text-[15px]`}>
+              {uploading ? 'Extracting items and totals from your receipt.' : 'Take a photo or upload an existing image'}
             </p>
+            {uploading && (
+              <div className={`w-full h-2 rounded-full mb-4 overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                <div
+                  className="h-full bg-gradient-to-r from-purple-500 to-indigo-600 transition-all duration-300"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            )}
 
             {error && (
               <div className="bg-red-100 text-red-600 text-sm px-4 py-3 rounded-xl mb-4">{error}</div>

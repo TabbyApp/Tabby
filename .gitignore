@@ -33,6 +33,7 @@ build/
 .env
 .env.*
 !.env.example
+server/secrets/
 
 ### Local data ###
 data/
