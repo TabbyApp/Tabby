@@ -117,7 +117,7 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
   }
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
+    <div className={`min-h-[100dvh] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
       {/* Header */}
       <motion.div initial={{ opacity: 0 }} animate={{ y: 0, opacity: 1 }} className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}>
         <div className="flex items-center gap-3">
@@ -128,7 +128,7 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
         </div>
       </motion.div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-6">
+      <div className="flex-1 overflow-y-auto px-5 py-6" style={{ paddingBottom: 'calc(7rem + env(safe-area-inset-bottom, 0px))' }}>
         <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="mb-6">
           <label className={`block text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>Group Name</label>
           <input type="text" value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="e.g., Lunch Squad"
@@ -166,24 +166,24 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
           </motion.div>
         )}
 
-        <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className={`${isDark ? 'bg-blue-900/30 border-blue-700' : 'bg-blue-50 border-blue-200'} border rounded-xl p-4`}>
+        <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className={`${isDark ? 'bg-blue-900/30 border-blue-700' : 'bg-blue-50 border-blue-200'} border rounded-xl p-4 mb-6`}>
           <p className={`text-sm ${isDark ? 'text-blue-300' : 'text-blue-800'}`}>
             Members will receive an invitation to join this group. A virtual card will be generated for group payments.
           </p>
         </motion.div>
-      </div>
 
-      <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="px-5 pb-6">
-        <button onClick={createGroup} disabled={!groupName.trim() || creating}
-          className={`w-full py-4 rounded-xl font-semibold shadow-lg transition-all ${
-            groupName.trim() && !creating
-              ? 'bg-gradient-to-r from-slate-600 to-blue-500 text-white active:scale-[0.98]'
-              : isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          {creating ? 'Creating...' : 'Create Group & Generate Card'}
-        </button>
-      </motion.div>
+        <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }}>
+          <button onClick={createGroup} disabled={!groupName.trim() || creating}
+            className={`w-full py-4 rounded-xl font-semibold shadow-lg transition-all ${
+              groupName.trim() && !creating
+                ? 'bg-gradient-to-r from-slate-600 to-blue-500 text-white active:scale-[0.98]'
+                : isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            {creating ? 'Creating...' : 'Create Group & Generate Card'}
+          </button>
+        </motion.div>
+      </div>
 
       <BottomNavigation currentPage="createGroup" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
       {showProfileSheet && (

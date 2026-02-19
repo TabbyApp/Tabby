@@ -37,7 +37,7 @@ export function SettingsPage({ onNavigate, theme, onThemeChange, onLogout }: Set
       </motion.div>
 
       {/* Settings List */}
-      <div className="flex-1 overflow-y-auto px-5 py-6">
+      <div className="flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         <motion.div
           initial={{ y: 6, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}

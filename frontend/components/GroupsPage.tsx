@@ -89,7 +89,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
       </motion.div>
 
       {/* Groups List */}
-      <div className="flex-1 overflow-y-auto px-5 py-5">
+      <div className="flex-1 overflow-y-auto px-5 py-5 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         {displayGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full">
             <div className={`w-20 h-20 rounded-full ${isDark ? 'bg-slate-800' : 'bg-slate-100'} flex items-center justify-center mb-4`}>

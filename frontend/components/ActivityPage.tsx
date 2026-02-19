@@ -81,7 +81,7 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
       </motion.div>
 
       {/* Activity List */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="flex-1 overflow-y-auto px-5 py-4 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         {loading ? (
           <div className="space-y-3 animate-pulse">
             {[1, 2, 3].map(i => (
