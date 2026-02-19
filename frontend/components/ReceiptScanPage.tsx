@@ -80,7 +80,7 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,image/heic,image/heif,image/x-adobe-dng,image/dng"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -90,7 +90,7 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
       <input
         ref={cameraInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,image/heic,image/heif,image/x-adobe-dng,image/dng"
         capture="environment"
         className="hidden"
         onChange={(e) => {

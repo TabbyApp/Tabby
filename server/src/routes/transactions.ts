@@ -289,6 +289,7 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
   const memberIds = await getGroupMemberIds(tx.group_id);
   const tip = tx.tip_amount ?? 0;
   let allocations: { user_id: string; amount: number }[] = [];
+  let allocationBreakdown: Record<string, { subtotal: number; tax: number; tip: number }> = {};
 
   const { rows: recRows } = await query<{ total: number | null }>('SELECT total FROM receipts WHERE transaction_id = $1 LIMIT 1', [id]);
   const receiptTotal = recRows[0]?.total != null ? Number(recRows[0].total) : null;
@@ -302,6 +303,11 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
     const diff = Math.round((total - rounded.reduce((a, b) => a + b, 0)) * 100) / 100;
     if (diff !== 0) rounded[0] += diff;
     allocations = memberIds.map((uid, i) => ({ user_id: uid, amount: rounded[i] }));
+    const shareBeforeTip = billBeforeTip / memberIds.length;
+    const tipPerPerson = tip / memberIds.length;
+    for (const uid of memberIds) {
+      allocationBreakdown[uid] = { subtotal: Math.round(shareBeforeTip * 100) / 100, tax: 0, tip: Math.round(tipPerPerson * 100) / 100 };
+    }
   } else {
     const { rows: receiptRows } = await query<{ id: string }>('SELECT id FROM receipts WHERE transaction_id = $1', [id]);
     const receipt = receiptRows[0];
@@ -351,17 +357,27 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
       const itemShare = userTotals[uid] ?? 0;
       const taxShare = itemShare * taxRatio;
       userTotals[uid] = itemShare + taxShare;
+      allocationBreakdown[uid] = {
+        subtotal: Math.round(itemShare * 100) / 100,
+        tax: Math.round(taxShare * 100) / 100,
+        tip: 0,
+      };
     }
     const preTipSum = Object.values(userTotals).reduce((a, b) => a + b, 0);
     const tipRatio = preTipSum > 0 ? tip / preTipSum : 1 / memberIds.length;
     for (const uid of memberIds) {
       const base = userTotals[uid] ?? 0;
-      userTotals[uid] = base + base * tipRatio;
+      const tipShare = base * tipRatio;
+      userTotals[uid] = base + tipShare;
+      allocationBreakdown[uid].tip = Math.round(tipShare * 100) / 100;
     }
     const finalSum = Object.values(userTotals).reduce((a, b) => a + b, 0);
     const diff = Math.round((total - finalSum) * 100) / 100;
     const firstUid = memberIds[0];
-    if (diff !== 0) userTotals[firstUid] = (userTotals[firstUid] ?? 0) + diff;
+    if (diff !== 0) {
+      userTotals[firstUid] = (userTotals[firstUid] ?? 0) + diff;
+      allocationBreakdown[firstUid].tip = Math.round((allocationBreakdown[firstUid].tip + diff) * 100) / 100;
+    }
 
     allocations = memberIds.map((uid) => ({ user_id: uid, amount: Math.round((userTotals[uid] ?? 0) * 100) / 100 }));
   }
@@ -370,7 +386,13 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
   const subtotal = Number(tx.subtotal ?? 0);
   const billBeforeTip = receiptTotal != null && receiptTotal >= subtotal ? receiptTotal : subtotal;
   const finalTotal = billBeforeTip + tip;
-  await query('UPDATE transactions SET status = $1, finalized_at = $2, total = $3 WHERE id = $4', ['FINALIZED', now, finalTotal, id]);
+  await query('UPDATE transactions SET status = $1, finalized_at = $2, total = $3, allocation_breakdown = $4 WHERE id = $5', [
+    'FINALIZED',
+    now,
+    finalTotal,
+    JSON.stringify(allocationBreakdown),
+    id,
+  ]);
   await query("UPDATE receipts SET status = 'completed', total = $1 WHERE transaction_id = $2", [finalTotal, id]);
   await query('DELETE FROM transaction_allocations WHERE transaction_id = $1', [id]);
   for (const a of allocations) {

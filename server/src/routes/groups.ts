@@ -315,6 +315,8 @@ groupsRouter.post('/', requireAuth, requireBankLinked, async (req, res) => {
     ...group,
     memberCount: parseInt(group.member_count, 10),
     cardLastFour: group.card_number_last_four,
+    inviteToken,
+    supportCode,
   });
 });
 
@@ -353,16 +355,51 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
   );
 
   let lastSettledAllocations: { user_id: string; name: string; amount: number }[] = [];
+  let lastSettledBreakdown: Record<string, { subtotal: number; tax: number; tip: number }> | undefined;
+  let lastSettledItemsPerUser: Record<string, { name: string; price: number }[]> | undefined;
   if (row.last_settled_at) {
-    const { rows: allocs } = await query<{ user_id: string; amount: number }>(
-      'SELECT ta.user_id, ta.amount FROM transaction_allocations ta WHERE ta.transaction_id = (SELECT id FROM transactions WHERE group_id = $1 AND status = $2 ORDER BY settled_at DESC LIMIT 1)',
+    const { rows: txRows } = await query<{ id: string; allocation_breakdown: unknown }>(
+      'SELECT id, allocation_breakdown FROM transactions WHERE group_id = $1 AND status = $2 ORDER BY settled_at DESC LIMIT 1',
       [groupId, 'SETTLED']
     );
-    if (allocs.length > 0) {
-      const userIds = allocs.map((a) => a.user_id);
-      const { rows: nameRows } = await query<{ id: string; name: string }>('SELECT id, name FROM users WHERE id = ANY($1)', [userIds]);
-      const nameMap = Object.fromEntries(nameRows.map((n) => [n.id, n.name]));
-      lastSettledAllocations = allocs.map((a) => ({ user_id: a.user_id, name: nameMap[a.user_id] ?? 'Unknown', amount: a.amount }));
+    const lastTx = txRows[0];
+    if (lastTx?.id) {
+      const { rows: allocs } = await query<{ user_id: string; amount: number }>(
+        'SELECT ta.user_id, ta.amount FROM transaction_allocations ta WHERE ta.transaction_id = $1',
+        [lastTx.id]
+      );
+      if (allocs.length > 0) {
+        const userIds = allocs.map((a) => a.user_id);
+        const { rows: nameRows } = await query<{ id: string; name: string }>('SELECT id, name FROM users WHERE id = ANY($1)', [userIds]);
+        const nameMap = Object.fromEntries(nameRows.map((n) => [n.id, n.name]));
+        lastSettledAllocations = allocs.map((a) => ({ user_id: a.user_id, name: nameMap[a.user_id] ?? 'Unknown', amount: a.amount }));
+      }
+      if (lastTx.allocation_breakdown && typeof lastTx.allocation_breakdown === 'object') {
+        lastSettledBreakdown = lastTx.allocation_breakdown as Record<string, { subtotal: number; tax: number; tip: number }>;
+      }
+      const { rows: recRows } = await query<{ id: string }>('SELECT id FROM receipts WHERE transaction_id = $1 LIMIT 1', [lastTx.id]);
+      const receiptId = recRows[0]?.id;
+      if (receiptId) {
+        const { rows: itemRows } = await query<{ id: string; name: string; price: number }>(
+          'SELECT id, name, price FROM receipt_items WHERE receipt_id = $1 ORDER BY sort_order, id',
+          [receiptId]
+        );
+        if (itemRows.length > 0) {
+          const { rows: claimRows } = await query<{ receipt_item_id: string; user_id: string }>(
+            'SELECT receipt_item_id, user_id FROM item_claims WHERE receipt_item_id = ANY($1)',
+            [itemRows.map((i) => i.id)]
+          );
+          const itemsById = Object.fromEntries(itemRows.map((i) => [i.id, i]));
+          const perUser: Record<string, { name: string; price: number }[]> = {};
+          for (const c of claimRows) {
+            const item = itemsById[c.receipt_item_id];
+            if (!item) continue;
+            if (!perUser[c.user_id]) perUser[c.user_id] = [];
+            perUser[c.user_id].push({ name: item.name, price: item.price });
+          }
+          lastSettledItemsPerUser = Object.keys(perUser).length > 0 ? perUser : undefined;
+        }
+      }
     }
   }
 
@@ -372,6 +409,8 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
     cardLastFour: row.card_number_last_four, inviteToken,
     supportCode: row.support_code, lastSettledAt: row.last_settled_at,
     lastSettledAllocations: lastSettledAllocations.length > 0 ? lastSettledAllocations : undefined,
+    lastSettledBreakdown: lastSettledBreakdown ?? undefined,
+    lastSettledItemsPerUser: lastSettledItemsPerUser ?? undefined,
     splitModePreference: row.split_mode_preference ?? 'item',
   });
 });
@@ -479,11 +518,11 @@ groupsRouter.delete('/:groupId/members/:memberId', requireAuth, async (req, res)
   res.json({ ok: true });
 });
 
-// Create transaction (on receipt upload or manual total entry)
+// Create transaction (on receipt upload or manual total entry). For FULL_CONTROL, optional receiptId links existing completed receipt.
 groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
-  const { splitMode } = req.body;
+  const { splitMode, receiptId: bodyReceiptId } = req.body;
 
   if (!['EVEN_SPLIT', 'FULL_CONTROL'].includes(splitMode)) {
     return res.status(400).json({ error: 'splitMode must be EVEN_SPLIT or FULL_CONTROL' });
@@ -505,6 +544,17 @@ groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, asyn
      VALUES ($1, $2, $3, 'PENDING_ALLOCATION', $4, $5)`,
     [id, groupId, userId, splitMode, deadline]
   );
+
+  if (splitMode === 'FULL_CONTROL' && bodyReceiptId && typeof bodyReceiptId === 'string') {
+    const { rowCount } = await query(
+      'UPDATE receipts SET transaction_id = $1 WHERE id = $2 AND group_id = $3 AND status = $4 AND (transaction_id IS NULL OR transaction_id = $1)',
+      [id, bodyReceiptId.trim(), groupId, 'completed']
+    );
+    if (rowCount === 0) {
+      await query('DELETE FROM transactions WHERE id = $1', [id]);
+      return res.status(400).json({ error: 'Receipt not found or already linked to a transaction' });
+    }
+  }
 
   const { rows } = await query('SELECT * FROM transactions WHERE id = $1', [id]);
   const row = rows[0] as any;

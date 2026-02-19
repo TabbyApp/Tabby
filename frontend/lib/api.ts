@@ -59,9 +59,9 @@ async function refreshAccessToken(): Promise<boolean> {
 
 async function request<T>(
   path: string,
-  options: RequestInit & { skipAuth?: boolean } = {}
+  options: RequestInit & { skipAuth?: boolean; noRefreshOn401?: boolean } = {}
 ): Promise<T> {
-  const { skipAuth, ...opts } = options;
+  const { skipAuth, noRefreshOn401, ...opts } = options;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string>),
@@ -87,7 +87,7 @@ async function request<T>(
     throw err;
   }
 
-  if (res.status === 401 && !skipAuth && token) {
+  if (res.status === 401 && !skipAuth && token && !noRefreshOn401) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       headers['Authorization'] = `Bearer ${accessToken}`;
@@ -116,13 +116,13 @@ async function request<T>(
 }
 
 export const api = {
-  /** Single call for initial load: user + groups + virtualCards. Use after login or on app init. */
-  bootstrap: () =>
+  /** Single call for initial load: user + groups + virtualCards. Use after login or on app init. Pass noRefreshOn401: true for initial session check to avoid double 401. */
+  bootstrap: (opts?: { noRefreshOn401?: boolean }) =>
     request<{
       user: { id: string; email: string; name: string; phone?: string; bank_linked: boolean; paymentMethods: unknown[] };
       groups: { id: string; name: string; memberCount: number; cardLastFour: string | null }[];
       virtualCards: { groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[];
-    }>('/bootstrap'),
+    }>('/bootstrap', opts ?? {}),
   auth: {
     signup: (email: string, password: string, name: string) =>
       request<{ accessToken: string; user: { id: string; email: string; name: string } }>('/auth/signup', {
@@ -187,7 +187,7 @@ export const api = {
     list: () =>
       request<{ id: string; name: string; memberCount: number; cardLastFour: string | null }[]>('/groups'),
     create: (name: string, memberEmails?: string[]) =>
-      request<{ id: string; name: string; memberCount: number; cardLastFour: string }>('/groups', {
+      request<{ id: string; name: string; memberCount: number; cardLastFour: string; inviteToken: string; supportCode: string }>('/groups', {
         method: 'POST',
         body: JSON.stringify({ name, memberEmails }),
       }),
@@ -367,10 +367,10 @@ export const api = {
       request<{ id: string; status: string; split_mode: string; receipt_id: string | null; allocation_deadline_at: string | null }[]>(
         `/transactions?groupId=${encodeURIComponent(groupId)}`
       ),
-    create: (groupId: string, splitMode: 'EVEN_SPLIT' | 'FULL_CONTROL') =>
+    create: (groupId: string, splitMode: 'EVEN_SPLIT' | 'FULL_CONTROL', receiptId?: string) =>
       request<{ id: string; group_id: string; status: string; split_mode: string; tip_amount: number; allocation_deadline_at: string }>(
         `/groups/${groupId}/transactions`,
-        { method: 'POST', body: JSON.stringify({ splitMode }) }
+        { method: 'POST', body: JSON.stringify({ splitMode, ...(receiptId ? { receiptId } : {}) }) }
       ),
     get: (id: string) =>
       request<{

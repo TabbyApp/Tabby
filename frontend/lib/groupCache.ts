@@ -11,6 +11,8 @@ export interface CachedGroupDetail {
   receipts: any[];
   lastSettledAt?: string | null;
   lastSettledAllocations?: { user_id: string; name: string; amount: number }[];
+  lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>;
+  lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>;
   supportCode?: string | null;
   cardLastFour?: string | null;
   splitModePreference?: string;
@@ -49,7 +51,7 @@ export async function prefetchGroupDetail(groupId: string): Promise<void> {
       api.receipts.list(groupId).catch(() => []),
     ]);
     if (groupData) {
-      const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
+      const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
       setCachedGroupDetail(groupId, {
         members: groupData.members,
         createdBy: groupData.created_by,
@@ -57,6 +59,8 @@ export async function prefetchGroupDetail(groupId: string): Promise<void> {
         receipts,
         lastSettledAt: g.lastSettledAt ?? null,
         lastSettledAllocations: g.lastSettledAllocations,
+        lastSettledBreakdown: g.lastSettledBreakdown,
+        lastSettledItemsPerUser: g.lastSettledItemsPerUser,
         supportCode: g.supportCode ?? null,
         cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
         splitModePreference: g.splitModePreference ?? 'item',
@@ -75,7 +79,7 @@ export async function prefetchAllGroupDetails(groupIds: string[]): Promise<void>
   try {
     const batch = await api.groups.getBatch(toFetch);
     for (const [id, data] of Object.entries(batch)) {
-      const d = data as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
+      const d = data as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
       setCachedGroupDetail(id, {
         members: data.members,
         createdBy: data.created_by,
@@ -83,6 +87,8 @@ export async function prefetchAllGroupDetails(groupIds: string[]): Promise<void>
         receipts: data.receipts ?? [],
         lastSettledAt: d.lastSettledAt ?? null,
         lastSettledAllocations: d.lastSettledAllocations,
+        lastSettledBreakdown: d.lastSettledBreakdown,
+        lastSettledItemsPerUser: d.lastSettledItemsPerUser,
         supportCode: d.supportCode ?? null,
         cardLastFour: data.cardLastFour ?? d.cardLastFour ?? null,
         splitModePreference: d.splitModePreference ?? 'item',

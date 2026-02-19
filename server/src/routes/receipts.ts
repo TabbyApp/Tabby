@@ -4,6 +4,8 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import convert from 'heic-convert';
+import extractd from 'extractd';
 import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { processReceipt } from '../receiptProcessor.js';
@@ -17,24 +19,36 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-const ALLOWED_MIMES = ['image/png', 'image/jpeg', 'image/jpg', 'image/x-png'];
+const ALLOWED_MIMES = [
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/x-png',
+  'image/heic',
+  'image/heif',
+  'image/x-adobe-dng', // iPhone ProRAW / raw from photo library
+  'image/dng',
+  'application/octet-stream', // some clients send raw as octet-stream
+];
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadsDir),
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname)?.toLowerCase() || '.jpg';
-    const safeExt = ['.png', '.jpg', '.jpeg'].includes(ext) ? ext : '.jpg';
+    const safeExt = ['.png', '.jpg', '.jpeg', '.heic', '.heif', '.dng'].includes(ext) ? ext : '.jpg';
     cb(null, `${crypto.randomUUID()}${safeExt}`);
   },
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 80 * 1024 * 1024 }, // 80MB for ProRAW / raw
   fileFilter: (_req, file, cb) => {
-    const ok = ALLOWED_MIMES.includes(file.mimetype);
-    if (ok) cb(null, true);
-    else cb(new Error('Please upload PNG or JPG'));
+    const ext = path.extname(file.originalname)?.toLowerCase();
+    const mimeOk = ALLOWED_MIMES.includes(file.mimetype);
+    const rawByExt = file.mimetype === 'application/octet-stream' && ext === '.dng';
+    if (mimeOk || rawByExt) cb(null, true);
+    else cb(new Error('Please upload PNG, JPG, HEIC, or raw (e.g. ProRAW/DNG) from camera or photo library'));
   },
 });
 
@@ -42,6 +56,43 @@ export const receiptsRouter = Router();
 
 function genId() {
   return crypto.randomUUID();
+}
+
+/** If the file is HEIC/HEIF or raw (DNG/ProRAW), convert to JPEG and return the new path; otherwise return original path. */
+async function ensureJpegForOcr(heicOrJpegPath: string): Promise<{ path: string; pathUrl: string }> {
+  const ext = path.extname(heicOrJpegPath).toLowerCase();
+  const dir = path.dirname(heicOrJpegPath);
+  const base = path.basename(heicOrJpegPath, ext);
+  const jpegPath = path.join(dir, base + '.jpg');
+
+  if (ext === '.dng') {
+    // iPhone ProRAW / raw from photo library: extract embedded preview via exiftool
+    const result = await extractd.generate(heicOrJpegPath, { destination: dir });
+    if ((result as { error?: string }).error) {
+      throw new Error('Could not read raw/ProRAW image. Try exporting as HEIC or JPEG from Photos.');
+    }
+    const out = result as { preview: string; source: string };
+    fs.unlinkSync(heicOrJpegPath);
+    // extractd may write with a different name; ensure we use our expected path for OCR
+    if (path.resolve(out.preview) !== path.resolve(jpegPath)) {
+      fs.renameSync(out.preview, jpegPath);
+    }
+    return { path: jpegPath, pathUrl: `/uploads/${path.basename(jpegPath)}` };
+  }
+
+  if (ext === '.heic' || ext === '.heif') {
+    const inputBuffer = fs.readFileSync(heicOrJpegPath);
+    const outputBuffer = await convert({
+      buffer: inputBuffer as unknown as ArrayBuffer,
+      format: 'JPEG',
+      quality: 0.9,
+    });
+    fs.writeFileSync(jpegPath, Buffer.from(outputBuffer));
+    fs.unlinkSync(heicOrJpegPath);
+    return { path: jpegPath, pathUrl: `/uploads/${path.basename(jpegPath)}` };
+  }
+
+  return { path: heicOrJpegPath, pathUrl: `/uploads/${path.basename(heicOrJpegPath)}` };
 }
 
 /** Create empty receipt for manual entry (no image) */
@@ -84,12 +135,13 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
     }
 
     const id = genId();
-    const filePath = `/uploads/${file.filename}`;
-    const fullPath = path.join(uploadsDir, file.filename);
+    let fullPath = path.join(uploadsDir, file.filename);
+    const { path: fullPathForOcr, pathUrl: filePath } = await ensureJpegForOcr(fullPath);
+    fullPath = fullPathForOcr;
     const provider = process.env.RECEIPT_OCR_PROVIDER || 'mock';
-    console.log('[Receipt] upload: receiptId=', id, 'groupId=', groupId, 'provider=', provider, 'file=', file.filename);
+    console.log('[Receipt] upload: receiptId=', id, 'groupId=', groupId, 'provider=', provider, 'file=', path.basename(fullPath));
 
-    // Insert receipt as UPLOADED first (file is already saved by multer)
+    // Insert receipt as UPLOADED first (file is already saved by multer; HEIC may have been converted to JPEG)
     await query(
       `INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status, parsed_output, confidence_map, failure_reason)
        VALUES ($1, $2, $3, $4, NULL, 'UPLOADED', NULL, NULL, NULL)`,
