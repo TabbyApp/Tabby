@@ -103,11 +103,12 @@ groupsRouter.get('/batch', requireAuth, async (req, res) => {
     supportCode: string | null; lastSettledAt: string | null;
     lastSettledAllocations?: { user_id: string; name: string; amount: number }[];
     receipts: { id: string; group_id: string; status: string; total: number | null; created_at: string; splits?: unknown[] }[];
+    splitModePreference: string;
   };
 
-  // 1) Get groups user is member of, with invite_token, card, support_code, last_settled_at
-  const { rows: groupRows } = await query<{ id: string; name: string; created_by: string; invite_token: string | null; card_number_last_four: string | null; support_code: string | null; last_settled_at: string | null }>(`
-    SELECT g.id, g.name, g.created_by, g.invite_token, g.support_code, g.last_settled_at, vc.card_number_last_four
+  // 1) Get groups user is member of, with invite_token, card, support_code, last_settled_at, split_mode_preference
+  const { rows: groupRows } = await query<{ id: string; name: string; created_by: string; invite_token: string | null; card_number_last_four: string | null; support_code: string | null; last_settled_at: string | null; split_mode_preference: string }>(`
+    SELECT g.id, g.name, g.created_by, g.invite_token, g.support_code, g.last_settled_at, COALESCE(g.split_mode_preference, 'item') as split_mode_preference, vc.card_number_last_four
     FROM groups g
     JOIN group_members gm ON g.id = gm.group_id
     LEFT JOIN virtual_cards vc ON g.id = vc.group_id
@@ -247,6 +248,7 @@ groupsRouter.get('/batch', requireAuth, async (req, res) => {
       lastSettledAt: (group as { last_settled_at?: string }).last_settled_at ?? null,
       receipts: receiptsWithSplits,
       lastSettledAllocations: allocsByGroup.get(g.id),
+      splitModePreference: (group as { split_mode_preference?: string }).split_mode_preference ?? 'item',
     };
   }
 
@@ -321,8 +323,8 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
 
-  const { rows } = await query<{ id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number; support_code: string | null; last_settled_at: string | null }>(`
-    SELECT g.id, g.name, g.created_by, g.created_at, g.invite_token, g.support_code, g.last_settled_at,
+  const { rows } = await query<{ id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number; support_code: string | null; last_settled_at: string | null; split_mode_preference: string }>(`
+    SELECT g.id, g.name, g.created_by, g.created_at, g.invite_token, g.support_code, g.last_settled_at, g.split_mode_preference,
            vc.card_number_last_four,
            (SELECT COUNT(*)::int FROM group_members WHERE group_id = g.id AND user_id = $1) as is_member
     FROM groups g
@@ -370,8 +372,32 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
     cardLastFour: row.card_number_last_four, inviteToken,
     supportCode: row.support_code, lastSettledAt: row.last_settled_at,
     lastSettledAllocations: lastSettledAllocations.length > 0 ? lastSettledAllocations : undefined,
+    splitModePreference: row.split_mode_preference ?? 'item',
   });
 });
+
+// Update group (host only) - e.g. split mode preference (PATCH and PUT for proxy compatibility)
+async function updateGroupHandler(req: any, res: any) {
+  const { userId } = (req as any).user;
+  const { groupId } = req.params;
+  const { splitModePreference } = req.body;
+
+  const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
+  const group = groupRows[0];
+  if (!group) return res.status(404).json({ error: 'Group not found' });
+  if (group.created_by !== userId) return res.status(403).json({ error: 'Only the host can update this group' });
+
+  if (splitModePreference !== undefined) {
+    if (!['even', 'item'].includes(splitModePreference)) {
+      return res.status(400).json({ error: 'splitModePreference must be "even" or "item"' });
+    }
+    await query('UPDATE groups SET split_mode_preference = $1 WHERE id = $2', [splitModePreference, groupId]);
+  }
+
+  res.json({ ok: true });
+}
+groupsRouter.patch('/:groupId', requireAuth, updateGroupHandler);
+groupsRouter.put('/:groupId', requireAuth, updateGroupHandler);
 
 // Join group via invite token (user becomes member immediately)
 groupsRouter.post('/join/:token', requireAuth, requireBankLinked, async (req, res) => {

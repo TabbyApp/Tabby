@@ -184,7 +184,7 @@ export const api = {
         body: JSON.stringify({ name, memberEmails }),
       }),
     get: (groupId: string) =>
-      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; avatarUrl?: string }[]; cardLastFour: string | null; inviteToken: string | null; supportCode: string | null; lastSettledAt: string | null }>(
+      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; avatarUrl?: string }[]; cardLastFour: string | null; inviteToken: string | null; supportCode: string | null; lastSettledAt: string | null; splitModePreference?: string }>(
         `/groups/${groupId}`
       ),
     /** Batch fetch group details - 1 request instead of N (avoids connection queueing) */
@@ -194,6 +194,7 @@ export const api = {
         members: { id: string; name: string; email: string }[];
         cardLastFour: string | null; inviteToken: string;
         receipts: { id: string; group_id: string; status: string; total: number | null; created_at: string; splits?: unknown[] }[];
+        splitModePreference?: string;
       }>>(
         `/groups/batch?ids=${encodeURIComponent(groupIds.join(','))}`
       ),
@@ -207,6 +208,8 @@ export const api = {
       request<{ ok: boolean }>(`/groups/${groupId}/leave`, { method: 'POST' }),
     removeMember: (groupId: string, memberId: string) =>
       request<{ ok: boolean }>(`/groups/${groupId}/members/${memberId}`, { method: 'DELETE' }),
+    updateSplitModePreference: (groupId: string, splitModePreference: 'even' | 'item') =>
+      request<{ ok: boolean }>(`/groups/${groupId}`, { method: 'PUT', body: JSON.stringify({ splitModePreference }) }),
     virtualCards: () =>
       request<{ groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[]>(
         '/groups/virtual-cards/list'
@@ -302,9 +305,12 @@ export const api = {
         claims: Record<string, string[]>; members: { id: string; name: string; email: string }[];
         allocations: { user_id: string; amount: number }[];
       }>(`/transactions/${id}`),
-    uploadReceipt: (transactionId: string, file: File | Blob) => {
+    uploadReceipt: (transactionId: string, file: File | Blob, receiptTotal?: number) => {
       const formData = new FormData();
       formData.append('file', file);
+      if (receiptTotal != null && !Number.isNaN(receiptTotal)) {
+        formData.append('receiptTotal', String(receiptTotal));
+      }
       const token = getAccessToken();
       return fetch(`${API_BASE}/transactions/${transactionId}/receipt`, {
         method: 'POST',

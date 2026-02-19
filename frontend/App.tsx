@@ -65,6 +65,8 @@ export default function App() {
   
   // Track the latest uploaded receipt ID
   const [lastReceiptId, setLastReceiptId] = useState<string | null>(null);
+  // When true, receipt scan is for even split - return to group after upload (no item selection)
+  const [receiptScanForEvenSplit, setReceiptScanForEvenSplit] = useState(false);
 
   const [receiptData, setReceiptData] = useState<{
     members: Array<{ id: number; name: string; amount: number; avatar: string }>;
@@ -74,6 +76,8 @@ export default function App() {
   const [itemSplitData, setItemSplitData] = useState<{
     hasSelectedItems: boolean;
     yourItemsTotal: number;
+    receiptTotal?: number;
+    subtotal?: number;
   }>({ hasSelectedItems: false, yourItemsTotal: 0 });
   
   // Real groups from backend
@@ -208,6 +212,26 @@ export default function App() {
     }
   };
 
+  /** Navigate to receipt items page with a specific receipt (for invited users or Edit) */
+  const handleNavigateToReceiptItems = (gId: string, receiptId: string) => {
+    setProcessingGroupId(gId);
+    setLastReceiptId(receiptId);
+    setSelectedGroupId(gId);
+    setReceiptScanForEvenSplit(false);
+    setPageHistory(prev => [...prev, currentPage]);
+    setCurrentPage('receiptItems');
+  };
+
+  /** Navigate to receipt scan - for even split returns to group after upload */
+  const handleNavigateToReceiptScan = (gId: string, forEvenSplit: boolean) => {
+    setProcessingGroupId(gId);
+    setSelectedGroupId(gId);
+    setReceiptScanForEvenSplit(forEvenSplit);
+    setLastReceiptId(null);
+    setPageHistory(prev => [...prev, currentPage]);
+    setCurrentPage('receiptScan');
+  };
+
   const handleThemeChange = (newTheme: 'light' | 'dark' | 'system') => {
     setThemePreference(newTheme);
   };
@@ -279,10 +303,10 @@ export default function App() {
               {currentPage === 'wallet' && <VirtualWalletPage onNavigate={handleNavigate} theme={theme} />}
               {currentPage === 'cardDetails' && <CardDetailsPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId ?? undefined} />}
               {currentPage === 'createGroup' && <CreateGroupPage onNavigate={handleNavigate} theme={theme} onGroupCreated={loadGroups} />}
-              {currentPage === 'receiptScan' && <ReceiptScanPage onNavigate={handleNavigate} theme={theme} realGroupId={processingGroupId} onReceiptUploaded={(id) => setLastReceiptId(id)} />}
-              {currentPage === 'receiptItems' && <ReceiptItemsPage onNavigate={handleNavigate} theme={theme} setReceiptData={setReceiptData} setItemSplitData={setItemSplitData} receiptId={lastReceiptId} groupId={processingGroupId} />}
+              {currentPage === 'receiptScan' && <ReceiptScanPage onNavigate={handleNavigate} theme={theme} realGroupId={processingGroupId} onReceiptUploaded={(id) => setLastReceiptId(id)} returnToGroupAfterUpload={receiptScanForEvenSplit} onReturnToGroup={() => { setReceiptScanForEvenSplit(false); invalidateGroupCache(processingGroupId ?? ''); }} />}
+              {currentPage === 'receiptItems' && <ReceiptItemsPage onNavigate={handleNavigate} theme={theme} setReceiptData={setReceiptData} setItemSplitData={setItemSplitData} receiptId={lastReceiptId} groupId={processingGroupId} onSelectionConfirmed={(gId) => invalidateGroupCache(gId)} />}
               {currentPage === 'processing' && <ProcessingPaymentPage onNavigate={handleNavigate} theme={theme} groupId={processingGroupId} accountType={accountType} transactionId={currentTransactionId} receiptData={receiptData} itemSplitData={itemSplitData} onSettlementComplete={() => { invalidateGroupCache(processingGroupId ?? ''); loadGroups(); }} />}
-              {currentPage === 'groupDetail' && <GroupDetailPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId} groups={[...activeGroups, ...recentGroups]} deleteGroup={deleteGroup} leaveGroup={leaveGroup} currentUserId={user?.id ?? ''} itemSplitData={itemSplitData} setItemSplitData={setItemSplitData} receiptData={receiptData} onStartProcessing={(txId) => { setCurrentTransactionId(txId); }} onGroupsChanged={loadGroups} />}
+              {currentPage === 'groupDetail' && <GroupDetailPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId} groups={[...activeGroups, ...recentGroups]} deleteGroup={deleteGroup} leaveGroup={leaveGroup} currentUserId={user?.id ?? ''} itemSplitData={itemSplitData} setItemSplitData={setItemSplitData} receiptData={receiptData} onStartProcessing={(txId) => { setCurrentTransactionId(txId); }} onGroupsChanged={loadGroups} onNavigateToReceiptItems={handleNavigateToReceiptItems} onNavigateToReceiptScan={handleNavigateToReceiptScan} />}
               {currentPage === 'notifications' && <NotificationsPage onNavigate={handleNavigate} theme={theme} notifications={notifications} setNotifications={setNotifications} unreadCount={unreadNotificationCount} acceptInvite={acceptInvite} declineInvite={declineInvite} />}
               {currentPage === 'notificationsSettings' && <NotificationsSettingsPage onNavigate={handleNavigate} theme={theme} />}
               {currentPage === 'privacySettings' && <PrivacySettingsPage onNavigate={handleNavigate} theme={theme} />}
@@ -295,7 +319,7 @@ export default function App() {
                   onNavigate={handleNavigate}
                   theme={theme}
                   inviteCode={pendingInviteToken ?? undefined}
-                  onAccepted={() => setPendingInviteToken(null)}
+                  onAccepted={() => { setPendingInviteToken(null); loadGroups(); }}
                 />
               )}
               {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}

@@ -299,11 +299,46 @@ Get group details with members.
   "created_at": "2026-02-01T18:00:00.000Z",
   "cardLastFour": "7823",
   "inviteToken": "a1b2c3d4e5f6...",
+  "supportCode": "494VQD",
+  "lastSettledAt": null,
+  "lastSettledAllocations": [],
+  "splitModePreference": "item",
   "members": [
-    { "id": "user-uuid", "name": "Jane Doe", "email": "jane@example.com" }
+    { "id": "user-uuid", "name": "Jane Doe", "email": "jane@example.com", "avatarUrl": "/uploads/avatars/..." }
   ]
 }
 ```
+
+`splitModePreference` is the host's chosen split mode for the group: `"even"` or `"item"`. All members see this value; it is synced when the host changes the toggle. Batch endpoint `GET /groups/batch?ids=...` also returns `splitModePreference` per group.
+
+---
+
+### PATCH `/groups/:groupId` or PUT `/groups/:groupId`
+
+Update group settings (host only). Used to sync the host's split mode so all members see the same option.
+
+**Auth Required:** Yes (must be the group host/creator)
+
+**Request Body:**
+```json
+{
+  "splitModePreference": "even"
+}
+```
+
+- `splitModePreference` — optional; `"even"` or `"item"`
+
+**Response (200):**
+```json
+{ "ok": true }
+```
+
+**Errors:**
+- `403` — Not the group host
+- `404` — Group not found
+- `400` — Invalid `splitModePreference` (must be `"even"` or `"item"`)
+
+PUT is supported as well as PATCH for proxy compatibility.
 
 ---
 
@@ -432,7 +467,8 @@ Upload a receipt image for OCR processing.
 **Form Fields:**
 - `file` — Image file (PNG/JPEG, max 10MB)
 - `groupId` — Group ID
-- `total` — Optional manual total
+
+Receipt total is taken from OCR (or item sum); manual total override is not allowed to avoid fraud.
 
 **Response (200):**
 ```json

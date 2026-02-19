@@ -1,66 +1,131 @@
 /**
- * OCR receipt parsing via TabScanner API.
- * Process endpoint returns a token; we wait ~5s then poll the result endpoint until done.
+ * OCR receipt parsing via Mindee API.
+ * Enqueue image → poll until Processed → fetch result → extract line items.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
-const TABSCANNER_PROCESS_URL = 'https://api.tabscanner.com/api/2/process';
-const TABSCANNER_RESULT_URL = 'https://api.tabscanner.com/api/result';
-const INITIAL_WAIT_MS = 5500;
-const POLL_INTERVAL_MS = 1000;
-const MAX_POLL_MS = 25_000;
+const MINDEE_BASE = 'https://api-v2.mindee.net';
+const MINDEE_ENQUEUE_URL = `${MINDEE_BASE}/v2/products/extraction/enqueue`;
 
-interface TabScannerProcessResponse {
-  token?: string;
-  duplicate?: boolean;
-  duplicateToken?: string;
-  success?: boolean;
-  status_code?: number;
-  code?: number;
-  message?: string;
+const POLL_INTERVAL_MS = 800;
+const MAX_POLL_MS = 60_000;
+
+const MINDEE_MODEL_ID = '951265b1-352e-455d-9463-6d470b865295';
+
+interface MindeeJob {
+  id: string;
+  status: 'Processing' | 'Failed' | 'Processed';
+  polling_url: string;
+  result_url?: string | null;
+  error?: { detail?: string };
 }
 
-interface LineItem {
-  lineTotal?: number;
-  descClean?: string;
-  desc?: string;
-  price?: number;
-  qty?: number;
+interface MindeeField {
+  value?: string | number | null;
+  fields?: Record<string, MindeeField>;
+  items?: MindeeField[];
 }
 
-interface TabScannerResultResponse {
-  status?: 'done' | 'pending' | 'failed';
-  success?: boolean;
-  status_code?: number;
-  code?: number;
-  result?: {
-    lineItems?: LineItem[];
+interface MindeeInference {
+  id: string;
+  result: {
+    fields?: Record<string, MindeeField>;
   };
 }
 
+interface MindeeResultResponse {
+  inference?: MindeeInference;
+}
+
 function getApiKey(): string {
-  const key = process.env.TABSCANNER_API_KEY;
+  const key = process.env.MINDEE_API_KEY;
   if (!key || key.trim() === '') {
-    throw new Error('TABSCANNER_API_KEY is not set. Add it to your environment.');
+    throw new Error('MINDEE_API_KEY is not set. Add it to your environment.');
   }
   return key.trim();
 }
 
-function mapLineItems(lineItems: LineItem[] | undefined): { name: string; price: number }[] {
-  if (!Array.isArray(lineItems)) return [];
-  const items: { name: string; price: number }[] = [];
-  for (const line of lineItems) {
-    const name = (line.descClean ?? line.desc ?? '').trim();
-    const price = line.lineTotal ?? line.price ?? 0;
-    if (!name || typeof price !== 'number' || Number.isNaN(price) || price <= 0 || price > 99999) continue;
-    if (name.length > 120) continue;
-    items.push({ name, price });
+function extractPrice(val: unknown): number | null {
+  if (typeof val === 'number' && !Number.isNaN(val) && val > 0 && val < 99999) return val;
+  if (typeof val === 'string') {
+    const n = parseFloat(val.replace(/[^0-9.-]/g, ''));
+    if (!Number.isNaN(n) && n > 0 && n < 99999) return n;
   }
+  return null;
+}
+
+function extractReceiptTotalValue(val: unknown): number | null {
+  if (typeof val === 'number' && !Number.isNaN(val) && val > 0 && val < 999999) return val;
+  if (typeof val === 'string') {
+    const n = parseFloat(val.replace(/[^0-9.-]/g, ''));
+    if (!Number.isNaN(n) && n > 0 && n < 999999) return n;
+  }
+  return null;
+}
+
+function extractName(val: unknown): string {
+  if (typeof val === 'string' && val.trim()) return val.trim().slice(0, 120);
+  return '';
+}
+
+/**
+ * Recursively find line-item-like arrays (objects with name + price) in Mindee result.
+ */
+function mapLineItemsFromFields(fields: Record<string, MindeeField> | undefined): { name: string; price: number }[] {
+  const items: { name: string; price: number }[] = [];
+  if (!fields || typeof fields !== 'object') return items;
+
+  const nameKeys = ['description', 'product', 'name', 'item_name', 'title', 'label'];
+  const priceKeys = ['total_amount', 'price', 'amount', 'total', 'unit_price'];
+
+  function scanField(f: MindeeField): void {
+    if (f.items && Array.isArray(f.items)) {
+      for (const it of f.items) {
+        if (it.fields) {
+          let name = '';
+          let price: number | null = null;
+          for (const k of Object.keys(it.fields)) {
+            const v = it.fields[k]?.value;
+            if (nameKeys.some(nk => k.toLowerCase().includes(nk))) name = extractName(v) || name;
+            if (priceKeys.some(pk => k.toLowerCase().includes(pk)) && price === null) price = extractPrice(v);
+          }
+          if (name && price !== null) items.push({ name, price });
+        } else if (it.value != null) {
+          // simple value - skip or use as name if we see a pattern
+        }
+        scanField(it);
+      }
+    }
+    if (f.fields) {
+      for (const v of Object.values(f.fields)) scanField(v);
+    }
+  }
+
+  for (const v of Object.values(fields)) scanField(v);
   return items;
 }
 
-export async function extractReceiptItems(imagePath: string): Promise<{ name: string; price: number }[]> {
+const RECEIPT_TOTAL_KEYS = ['total', 'total_amount', 'grand_total', 'amount', 'final_total', 'receipt_total'];
+
+function extractReceiptTotal(fields: Record<string, MindeeField> | undefined): number | null {
+  if (!fields || typeof fields !== 'object') return null;
+  for (const key of RECEIPT_TOTAL_KEYS) {
+    const f = fields[key];
+    if (!f) continue;
+    const v = f.value ?? (f.fields && typeof f.fields.value === 'object' ? f.fields.value?.value : undefined);
+    const n = extractReceiptTotalValue(v);
+    if (n != null && n > 0) return n;
+  }
+  return null;
+}
+
+export type ReceiptExtractionResult = {
+  items: { name: string; price: number }[];
+  receiptTotal?: number | null;
+};
+
+export async function extractReceiptItems(imagePath: string): Promise<ReceiptExtractionResult> {
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('Receipt scanning is not configured. Use "Manual Entry" to add items by hand.');
@@ -72,82 +137,102 @@ export async function extractReceiptItems(imagePath: string): Promise<{ name: st
   const fileName = path.basename(imagePath) || (ext === '.png' ? 'receipt.png' : 'receipt.jpg');
 
   const form = new FormData();
+  form.append('model_id', MINDEE_MODEL_ID);
   form.append('file', new Blob([buffer], { type: mime }), fileName);
 
-  const processRes = await fetch(TABSCANNER_PROCESS_URL, {
+  const enqueueRes = await fetch(MINDEE_ENQUEUE_URL, {
     method: 'POST',
     headers: {
-      apikey: apiKey,
+      Authorization: apiKey,
     },
     body: form,
   });
 
-  const processBody = await processRes.text();
-  let processJson: TabScannerProcessResponse;
+  const enqueueBody = await enqueueRes.text();
+  let enqueueJson: { job?: MindeeJob };
   try {
-    processJson = JSON.parse(processBody) as TabScannerProcessResponse;
+    enqueueJson = JSON.parse(enqueueBody) as { job?: MindeeJob };
   } catch {
-    console.warn('TabScanner process non-JSON response:', processRes.status, processBody.slice(0, 200));
+    console.warn('Mindee enqueue non-JSON:', enqueueRes.status, enqueueBody.slice(0, 200));
     throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
   }
 
-  if (!processRes.ok) {
-    console.warn('TabScanner process error:', processJson.code ?? processRes.status, processJson.message ?? processRes.status);
+  if (!enqueueRes.ok) {
+    const err = enqueueJson as { detail?: string; title?: string };
+    console.warn('Mindee enqueue error:', enqueueRes.status, err.detail ?? err.title ?? enqueueBody.slice(0, 200));
+    if (enqueueRes.status === 401) {
+      throw new Error('OCR is not configured. Check MINDEE_API_KEY in server/.env and ensure the key is valid.');
+    }
     throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
   }
 
-  if (!processJson.success) {
-    console.warn('TabScanner process not success:', processJson.message ?? 'TabScanner rejected the image', processJson);
+  const job = enqueueJson.job;
+  if (!job?.id || !job.polling_url) {
+    console.warn('Mindee no job in response:', enqueueJson);
     throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
   }
-
-  const token = processJson.duplicate && processJson.duplicateToken
-    ? processJson.duplicateToken
-    : processJson.token;
-
-  if (!token) {
-    console.warn('TabScanner no token in response:', processJson);
-    throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
-  }
-
-  await new Promise((r) => setTimeout(r, INITIAL_WAIT_MS));
 
   const startedAt = Date.now();
-  let last: TabScannerResultResponse = {};
+  let resultUrl: string | null = null;
 
   while (Date.now() - startedAt < MAX_POLL_MS) {
-    const resultRes = await fetch(`${TABSCANNER_RESULT_URL}/${encodeURIComponent(token)}`, {
+    const pollRes = await fetch(`${job.polling_url}?redirect=false`, {
       method: 'GET',
-      headers: {
-        apikey: apiKey,
-      },
+      headers: { Authorization: apiKey },
     });
-
-    const contentType = resultRes.headers.get('content-type') ?? '';
-    const body = await resultRes.text();
-    if (!contentType.includes('application/json')) {
-      console.warn('TabScanner result non-JSON response:', resultRes.status, body.slice(0, 200));
-      throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
-    }
+    const pollBody = await pollRes.text();
+    let pollJson: { job?: MindeeJob };
     try {
-      last = JSON.parse(body) as TabScannerResultResponse;
+      pollJson = JSON.parse(pollBody) as { job?: MindeeJob };
     } catch {
-      console.warn('TabScanner result parse error:', body.slice(0, 200));
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      continue;
+    }
+
+    const j = pollJson.job;
+    if (!j) {
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+      continue;
+    }
+
+    if (j.status === 'Failed') {
+      console.warn('Mindee job failed:', j.error?.detail ?? pollBody);
       throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
     }
 
-    if (last.status === 'done' && last.result?.lineItems) {
-      return mapLineItems(last.result.lineItems);
-    }
-
-    if (last.status === 'failed') {
-      console.warn('TabScanner result failed:', last.code, last);
-      throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
+    if (j.status === 'Processed' && j.result_url) {
+      resultUrl = j.result_url;
+      break;
     }
 
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
 
-  console.warn('TabScanner result timeout');
-  throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
+  if (!resultUrl) {
+    console.warn('Mindee result timeout');
+    throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
+  }
+
+  const resultRes = await fetch(resultUrl, {
+    method: 'GET',
+    headers: { Authorization: apiKey },
+  });
+  const resultBody = await resultRes.text();
+  let resultJson: MindeeResultResponse;
+  try {
+    resultJson = JSON.parse(resultBody) as MindeeResultResponse;
+  } catch {
+    console.warn('Mindee result non-JSON:', resultRes.status, resultBody.slice(0, 200));
+    throw new Error('Couldn\'t read the image. Please try again with a clearer photo.');
+  }
+
+  const fields = resultJson.inference?.result?.fields;
+  const items = mapLineItemsFromFields(fields);
+  const receiptTotal = extractReceiptTotal(fields);
+
+  if (items.length === 0) {
+    throw new Error('No line items found on the receipt. Try "Manual Entry" to add items by hand.');
+  }
+
+  return { items, receiptTotal: receiptTotal ?? null };
 }

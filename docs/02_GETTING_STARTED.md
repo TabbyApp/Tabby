@@ -11,7 +11,7 @@ This guide walks you through setting up Tabby locally from a fresh clone.
 | **Git** | 2.30+ | `git -v` |
 
 Optional:
-- **TabScanner API key** — Required for receipt OCR. Get one at [tabscanner.com](https://tabscanner.com). Without it, receipt uploads will fail OCR but the rest of the app works.
+- **Mindee API key** — Required for receipt OCR. Get one at [mindee.com](https://mindee.com). Create a custom extraction model for receipts. Without it, receipt uploads will fail OCR but the rest of the app works.
 
 ## Quick Start (5 minutes)
 
@@ -53,8 +53,11 @@ cp server/.env.example server/.env
 If `.env.example` doesn't exist, create `server/.env` manually:
 
 ```env
+# Database (required)
+DATABASE_URL=postgresql://user:password@localhost:5432/tabby
+
 # Required for receipt OCR
-TABSCANNER_API_KEY=your_tabscanner_api_key_here
+MINDEE_API_KEY=your_mindee_api_key_here
 
 # JWT secrets (defaults work for local dev, MUST change in production)
 # JWT_ACCESS_SECRET=your-access-secret
@@ -75,15 +78,16 @@ TABSCANNER_API_KEY=your_tabscanner_api_key_here
 # TWILIO_PHONE_NUMBER=
 ```
 
-> **Important:** The only required variable is `TABSCANNER_API_KEY` for OCR. Everything else has sensible defaults for local development.
+> **Important:** Set `DATABASE_URL` to a running PostgreSQL instance (e.g. `postgresql://user:password@localhost:5432/tabby`). For local dev you can use Docker: `docker compose up -d db` (see **Run with Docker** below). `MINDEE_API_KEY` is required for receipt OCR.
 
-### 5. Seed the Database (Optional)
+### 5. Run Migrations and Seed (Optional)
 
-To populate the database with test data:
+Apply schema and optionally add test data:
 
 ```bash
 cd server
-npm run seed
+npm run migrate   # applies server/migrations/*.sql
+npm run seed      # optional: adds test account and demo groups
 cd ..
 ```
 
@@ -126,7 +130,7 @@ You should get a JSON response with `accessToken` and `user`.
 
 Open `http://localhost:3000` in your browser. You should see the Tabby splash screen followed by the login page.
 
-### Check OCR (if TabScanner key is set)
+### Check OCR (if Mindee key is set)
 
 1. Log in with `test@tabby.com` / `password123`
 2. Go to a group → Upload Receipt
@@ -148,18 +152,19 @@ npm install
 cd server && npm install
 ```
 
-### SQLite errors on startup
+### Database / Postgres errors on startup
 
-Delete the database and re-seed:
+Ensure PostgreSQL is running and `DATABASE_URL` in `server/.env` is correct. Apply migrations, then seed if needed:
 
 ```bash
-rm data/tabby.db
-cd server && npm run seed
+cd server && npm run migrate && npm run seed
 ```
 
-### OCR fails / "TabScanner API key missing"
+To run Postgres locally via Docker: `docker compose up -d db` (see **Run with Docker** below).
 
-Ensure `TABSCANNER_API_KEY` is set in `server/.env`. The key must be a valid TabScanner API key.
+### OCR fails / "Mindee API key missing"
+
+Ensure `MINDEE_API_KEY` is set in `server/.env`. The key must be a valid Mindee API key.
 
 ### Port 3000 or 3001 already in use
 
@@ -190,6 +195,7 @@ kill -9 <PID>
 | `npm run dev` | `tsx watch src/index.ts` | Start backend with hot reload |
 | `npm run build` | `tsc` | Compile TypeScript to `dist/` |
 | `npm run start` | `node dist/index.js` | Run compiled production server |
+| `npm run migrate` | (see `package.json`) | Apply PostgreSQL migrations |
 | `npm run seed` | `tsx src/seed.ts` | Seed database with test data |
 
 ## Development Workflow
@@ -200,9 +206,19 @@ kill -9 <PID>
 4. Commit with a descriptive message
 5. Push and create a PR against `hmachhi/mvp`
 
+## Run with Docker
+
+To run Postgres and the API with one command:
+
+```bash
+docker compose up
+```
+
+This starts the **db** (PostgreSQL on port 5433) and **api** (Node server on 3001). Migrations run on API startup. For frontend, run `npm run dev` in another terminal. To run only Postgres for local dev: `docker compose up -d db` and set `DATABASE_URL=postgresql://tabby:tabby@localhost:5433/tabby` (or match `docker-compose.yaml`).
+
 ## Useful Tools
 
-- **SQLite Browser** — [DB Browser for SQLite](https://sqlitebrowser.org/) to inspect `data/tabby.db`
+- **PostgreSQL client** — Use `psql`, [TablePlus](https://tableplus.com/), or similar to inspect the database (connect with `DATABASE_URL`)
 - **Postman / Insomnia** — Test API endpoints with auth tokens
 - **React DevTools** — Chrome extension for component inspection
 - **Vite Inspector** — Press `Ctrl+Shift+I` in the dev server for component source mapping

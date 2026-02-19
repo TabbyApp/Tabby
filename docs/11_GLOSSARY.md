@@ -9,7 +9,7 @@ Quick reference for terms, acronyms, and concepts used throughout the Tabby code
 | Term | Definition |
 |------|-----------|
 | **Group** | A payment session. One group = one bill-splitting event. Created by a host, joined by members. |
-| **Host** | The user who created the group. Has elevated permissions (set tip, confirm payment, delete group, remove members). Also referred to as "creator" in code (`created_by`). |
+| **Host** | The user who created the group. Has elevated permissions: upload receipts, set tip, confirm payment, delete group, remove members, and set the group's split mode (even vs item). Only the host can upload a receipt. Also referred to as "creator" in code (`created_by`). |
 | **Member** | Any user who has joined a group. The host is also a member. |
 | **Session** | Synonym for group. A session starts when the group is created and ends when the transaction settles. |
 | **Transaction** | The financial record for a group payment. Contains the split mode, amounts, tip, and allocations. |
@@ -22,6 +22,7 @@ Quick reference for terms, acronyms, and concepts used throughout the Tabby code
 | **Archive** | After settlement, a group becomes historical. Visible in Activity tab but no longer active. |
 | **Virtual Card** | A mock card number generated per group. Cosmetic in MVP — not connected to any payment network. |
 | **Invite Token** | A 24-character hex string used to generate invite links and QR codes for group joining. |
+| **Split mode preference** | The host's choice of **Split Evenly** vs **Item Split**, stored in `groups.split_mode_preference`. Synced to all members via GET group/batch and updated via PATCH/PUT `/groups/:groupId`. When a pending receipt exists, non-hosts are locked to item split. |
 
 ---
 
@@ -51,10 +52,10 @@ Quick reference for terms, acronyms, and concepts used throughout the Tabby code
 | **JWT** | JSON Web Token. Used for authentication. Contains userId and email, signed with a secret key. |
 | **Access Token** | Short-lived JWT (15 min) sent in `Authorization: Bearer` header on every API request. |
 | **Refresh Token** | Long-lived JWT (7 days) stored as HTTP-only cookie. Used to get new access tokens. |
-| **OCR** | Optical Character Recognition. Converts receipt images to text/data. Tabby uses TabScanner API. |
-| **TabScanner** | Third-party API service for receipt OCR. Extracts line items with names and prices. |
+| **OCR** | Optical Character Recognition. Converts receipt images to text/data. Tabby uses Mindee API. |
+| **Mindee** | Third-party API service for document/receipt extraction. Extracts line items with names and prices via custom models. |
 | **Multer** | Express middleware for handling `multipart/form-data` (file uploads). |
-| **better-sqlite3** | Node.js SQLite driver. Provides synchronous, fast access to SQLite databases. |
+| **PostgreSQL / pg** | Database: PostgreSQL. The Node.js app uses the `pg` driver; connection via `DATABASE_URL`. All DB access is async (e.g. `query()`, `withTransaction()`). |
 | **bcryptjs** | Password hashing library. Uses salt rounds (10) to securely hash passwords. |
 | **Vite** | Frontend build tool. Provides fast dev server with hot module replacement (HMR). |
 | **SWC** | Speedy Web Compiler. Vite plugin for fast TypeScript/JSX compilation. |

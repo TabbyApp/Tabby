@@ -25,12 +25,12 @@
 │                       │                              │
 │  ┌────────────────────┼──────────────────────────┐  │
 │  │                    ▼                           │  │
-│  │          SQLite (better-sqlite3)               │  │
-│  │          data/tabby.db                         │  │
+│  │          PostgreSQL (pg)                      │  │
+│  │          DATABASE_URL                         │  │
 │  └────────────────────────────────────────────────┘  │
 │                       │                              │
 │  ┌────────────────────┼──────────────────────────┐  │
-│  │              TabScanner API                    │  │
+│  │              Mindee API                        │  │
 │  │          (External OCR service)                │  │
 │  └────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────┘
@@ -180,14 +180,7 @@ Two middleware functions gate routes:
 
 ### Database Access Pattern
 
-SQLite is accessed **synchronously** via `better-sqlite3`. There is no ORM — all queries are raw SQL with prepared statements:
-
-```typescript
-const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-db.prepare('UPDATE users SET name = ? WHERE id = ?').run(name, userId);
-```
-
-This is a deliberate choice for MVP simplicity. The synchronous API means no `async/await` for DB calls.
+PostgreSQL is accessed via the **pg** driver. There is no ORM — all queries are raw SQL using the shared `query()` helper and parameterized values (`$1`, `$2`, …). Multi-step writes use `withTransaction()` for atomicity. Connection string is in `DATABASE_URL`; migrations live in `server/migrations/*.sql`.
 
 ### OCR Pipeline
 
@@ -195,7 +188,7 @@ This is a deliberate choice for MVP simplicity. The synchronous API means no `as
 Upload image (multer) → Save to disk
     │
     ▼
-POST image to TabScanner /process
+POST image to Mindee /enqueue
     │
     ▼
 Wait 5.5 seconds

@@ -23,12 +23,16 @@ Then log in with:
 
 New signups start with an empty account.
 
+## Invites and item split
+
+Invite links use `/join/:token`. After joining, if the host has uploaded a receipt, invited members can open **Select Your Items** to claim items from that receipt. Only the host can upload receipts. The host's choice of **Split Evenly** vs **Item Split** is synced so all members see the same mode; receipt total is taken from the receipt (no manual override).
+
 ## OCR (receipt scanning)
 
-Receipt uploads use the [TabScanner](https://tabscanner.com/) API to extract line items. Set your API key in the server environment:
+Receipt uploads use the [Mindee](https://mindee.com/) API (custom extraction model) to extract line items. Set your API key in the server environment:
 
 ```bash
-export TABSCANNER_API_KEY=your_api_key
+export MINDEE_API_KEY=your_api_key
 ```
 
 Then run the server as above. Works best with clear photos of printed receipts. If OCR misses items, add them manually on the itemization screen.

@@ -8,7 +8,7 @@
 | 2 | Invite doesn't work in groups | Pending (join link exists; may need URL routing for /join/:token) |
 | 3 | Virtual card on home: fake data, shows to users with no groups | Done |
 | 4 | CardDetailsPage: all fake data (transactions, members, balance) | Done |
-| 5 | TabScanner API key not set error | Done (graceful message: use Manual Entry) |
+| 5 | Mindee API key not set error | Done (graceful message: use Manual Entry) |
 | 6 | Manual entry: can't add items (no receipt created for manual flow) | Done |
 
 ## Features to Add
@@ -23,7 +23,7 @@
 ## Completed Changes
 
 - **LoginSignup**: Email/Phone tab; phone flow: enter number → Send Code → enter OTP → Verify
-- **TabScanner**: When API key not set, returns friendly error suggesting Manual Entry
+- **Mindee**: When API key not set, returns friendly error suggesting Manual Entry
 - **LandingPage**: Active Card hidden when user has no groups; uses real card data
 - **CardDetailsPage**: Accepts groupId, fetches real group data (name, card, balance, members)
 - **Manual entry**: POST /receipts (create empty receipt) + frontend creates receipt before navigating to ReceiptItemsPage

@@ -83,13 +83,13 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
 
     const fullPath = path.join(uploadsDir, file.filename);
 
-    let items: { name: string; price: number }[];
+    let extraction: Awaited<ReturnType<typeof extractReceiptItems>>;
     try {
       const ocrPromise = extractReceiptItems(fullPath);
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Couldn\'t read the image. Please try again.')), 35_000)
       );
-      items = await Promise.race([ocrPromise, timeout]);
+      extraction = await Promise.race([ocrPromise, timeout]);
     } catch (ocrErr) {
       try { fs.unlinkSync(fullPath); } catch { /* ignore */ }
       const msg = ocrErr instanceof Error ? ocrErr.message : 'Couldn\'t read the image.';
@@ -97,12 +97,18 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
       return res.status(422).json({ error: 'Couldn\'t read the image. Please try again with a clearer photo.' });
     }
 
+    const { items } = extraction;
+    const ocrReceiptTotal = extraction.receiptTotal;
+    const subtotal = items.reduce((s, i) => s + Number(i.price), 0);
+    const manualTotal = total != null && String(total).trim() !== '' ? parseFloat(String(total)) : NaN;
+    const receiptTotalToStore = !Number.isNaN(manualTotal) ? manualTotal : (ocrReceiptTotal != null && ocrReceiptTotal >= subtotal ? ocrReceiptTotal : subtotal);
+
     const id = genId();
     const filePath = `/uploads/${file.filename}`;
 
     await query(
       'INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status) VALUES ($1, $2, $3, $4, $5, $6)',
-      [id, groupId, userId, filePath, total ? parseFloat(total) : null, 'pending']
+      [id, groupId, userId, filePath, Number.isNaN(receiptTotalToStore) ? subtotal : receiptTotalToStore, 'pending']
     );
 
     let sortOrder = 0;

@@ -8,7 +8,7 @@ Quick checklist to confirm all wired flows work after the Figma sync and backend
    ```bash
    cd server && npm install && npm run dev
    ```
-   Server runs at `http://localhost:3001`. Uses SQLite (no extra DB setup if using default).
+   Server runs at `http://localhost:3001`. Uses PostgreSQL — set `DATABASE_URL` in `server/.env` and run `npm run migrate` (and optionally `npm run seed`). Or use `docker compose up -d db` for a local Postgres.
 
 2. **Frontend** (from repo root):
    ```bash
@@ -16,11 +16,11 @@ Quick checklist to confirm all wired flows work after the Figma sync and backend
    ```
    App runs at `http://localhost:3000`. Vite proxies `/api` to `http://localhost:3001`, so no `VITE_API_URL` needed in dev.
 
-3. **Optional**: Seed DB with test user/groups:
+3. **Optional**: Seed DB with test user/groups (run after `npm run migrate`):
    ```bash
-   cd server && npm run seed
+   cd server && npm run migrate && npm run seed
    ```
-   (If you have a seed script; otherwise sign up manually.)
+   (Otherwise sign up manually.)
 
 ---
 

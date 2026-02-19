@@ -143,6 +143,7 @@ transactionsRouter.post('/:id/receipt', requireAuth, upload.single('file'), asyn
   try {
     const { userId } = (req as any).user;
     const { id } = req.params;
+    const { receiptTotal: manualReceiptTotal } = req.body;
     const file = req.file;
 
     const { rows: txRows } = await query('SELECT t.* FROM transactions t JOIN group_members gm ON t.group_id = gm.group_id WHERE t.id = $1 AND gm.user_id = $2', [id, userId]);
@@ -152,26 +153,30 @@ transactionsRouter.post('/:id/receipt', requireAuth, upload.single('file'), asyn
     if (!file) return res.status(400).json({ error: 'No image file provided' });
 
     const fullPath = path.join(uploadsDir, file.filename);
-    let items: { name: string; price: number }[];
+    let extraction: Awaited<ReturnType<typeof extractReceiptItems>>;
     try {
       const ocrPromise = extractReceiptItems(fullPath);
       const timeout = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Couldn\'t read the image.')), 35_000)
       );
-      items = await Promise.race([ocrPromise, timeout]);
+      extraction = await Promise.race([ocrPromise, timeout]);
     } catch (ocrErr) {
       try { fs.unlinkSync(fullPath); } catch { /* ignore */ }
       return res.status(422).json({ error: 'Couldn\'t read the image. Please try again with a clearer photo.' });
     }
 
+    const { items } = extraction;
+    const ocrReceiptTotal = extraction.receiptTotal ?? null;
     const receiptId = genId();
     const filePath = `/uploads/${file.filename}`;
     const subtotal = items.reduce((s, i) => s + Number(i.price), 0);
+    const manualTotal = manualReceiptTotal != null && String(manualReceiptTotal).trim() !== '' ? parseFloat(String(manualReceiptTotal)) : NaN;
+    const storedReceiptTotal = !Number.isNaN(manualTotal) && manualTotal >= subtotal ? manualTotal : (ocrReceiptTotal != null && ocrReceiptTotal >= subtotal ? ocrReceiptTotal : subtotal);
 
     await query(`
       INSERT INTO receipts (id, group_id, uploaded_by, file_path, total, status, transaction_id)
       VALUES ($1, $2, $3, $4, $5, 'pending', $6)
-    `, [receiptId, tx.group_id, userId, filePath, subtotal, id]);
+    `, [receiptId, tx.group_id, userId, filePath, storedReceiptTotal, id]);
 
     let sortOrder = 0;
     for (const item of items) {
@@ -181,9 +186,11 @@ transactionsRouter.post('/:id/receipt', requireAuth, upload.single('file'), asyn
       );
     }
 
-    await query('UPDATE transactions SET subtotal = $1, total = $2 WHERE id = $3', [subtotal, subtotal, id]);
+    const tip = tx.tip_amount ?? 0;
+    const total = storedReceiptTotal + tip;
+    await query('UPDATE transactions SET subtotal = $1, total = $2 WHERE id = $3', [subtotal, total, id]);
 
-    res.status(201).json({ receipt_id: receiptId, items, subtotal });
+    res.status(201).json({ receipt_id: receiptId, items, subtotal, receiptTotal: storedReceiptTotal });
   } catch (err) {
     console.error('Transaction receipt upload:', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Upload failed' });
@@ -226,8 +233,11 @@ transactionsRouter.put('/:id/tip', requireAuth, async (req, res) => {
 
   const tip = Math.max(0, Number(tipAmount) || 0);
   const subtotal = Number(tx.subtotal ?? 0);
-  await query('UPDATE transactions SET tip_amount = $1, subtotal = $2, total = $3 WHERE id = $4', [tip, subtotal, subtotal + tip, id]);
-  res.json({ tip_amount: tip, subtotal, total: subtotal + tip });
+  const { rows: recRows } = await query<{ total: number | null }>('SELECT total FROM receipts WHERE transaction_id = $1 LIMIT 1', [id]);
+  const receiptTotal = recRows[0]?.total != null ? Number(recRows[0].total) : subtotal;
+  const total = receiptTotal + tip;
+  await query('UPDATE transactions SET tip_amount = $1, subtotal = $2, total = $3 WHERE id = $4', [tip, subtotal, total, id]);
+  res.json({ tip_amount: tip, subtotal, receiptTotal, total });
 });
 
 // Set item claims (FULL_CONTROL)
@@ -280,9 +290,13 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
   const tip = tx.tip_amount ?? 0;
   let allocations: { user_id: string; amount: number }[] = [];
 
+  const { rows: recRows } = await query<{ total: number | null }>('SELECT total FROM receipts WHERE transaction_id = $1 LIMIT 1', [id]);
+  const receiptTotal = recRows[0]?.total != null ? Number(recRows[0].total) : null;
+
   if (tx.split_mode === 'EVEN_SPLIT') {
     const subtotal = Number(tx.subtotal ?? 0);
-    const total = subtotal + tip;
+    const billBeforeTip = receiptTotal ?? subtotal;
+    const total = billBeforeTip + tip;
     const perPerson = total / memberIds.length;
     const rounded = memberIds.map(() => Math.round(perPerson * 100) / 100);
     const diff = Math.round((total - rounded.reduce((a, b) => a + b, 0)) * 100) / 100;
@@ -328,9 +342,18 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
     }
 
     const subtotal = items.reduce((s, i) => s + Number(i.price), 0);
-    const total = subtotal + tip;
-    const sumUserTotals = Object.values(userTotals).reduce((a, b) => a + b, 0);
-    const tipRatio = sumUserTotals > 0 ? tip / sumUserTotals : 1 / memberIds.length;
+    const billBeforeTip = receiptTotal != null && receiptTotal >= subtotal ? receiptTotal : subtotal;
+    const tax = Math.max(0, billBeforeTip - subtotal);
+    const total = billBeforeTip + tip;
+
+    const taxRatio = subtotal > 0 ? tax / subtotal : 0;
+    for (const uid of memberIds) {
+      const itemShare = userTotals[uid] ?? 0;
+      const taxShare = itemShare * taxRatio;
+      userTotals[uid] = itemShare + taxShare;
+    }
+    const preTipSum = Object.values(userTotals).reduce((a, b) => a + b, 0);
+    const tipRatio = preTipSum > 0 ? tip / preTipSum : 1 / memberIds.length;
     for (const uid of memberIds) {
       const base = userTotals[uid] ?? 0;
       userTotals[uid] = base + base * tipRatio;
@@ -344,8 +367,10 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
   }
 
   const now = new Date().toISOString();
-  const finalTotal = Number(tx.subtotal ?? 0) + Number(tx.tip_amount ?? 0);
-  await query('UPDATE transactions SET status = $1, finalized_at = $2 WHERE id = $3', ['FINALIZED', now, id]);
+  const subtotal = Number(tx.subtotal ?? 0);
+  const billBeforeTip = receiptTotal != null && receiptTotal >= subtotal ? receiptTotal : subtotal;
+  const finalTotal = billBeforeTip + tip;
+  await query('UPDATE transactions SET status = $1, finalized_at = $2, total = $3 WHERE id = $4', ['FINALIZED', now, finalTotal, id]);
   await query("UPDATE receipts SET status = 'completed', total = $1 WHERE transaction_id = $2", [finalTotal, id]);
   await query('DELETE FROM transaction_allocations WHERE transaction_id = $1', [id]);
   for (const a of allocations) {
@@ -378,7 +403,10 @@ export async function runFallbackForTransaction(id: string): Promise<boolean> {
 
   const memberIds = await getGroupMemberIds(tx.group_id);
   const subtotal = Number(tx.subtotal ?? 0);
-  const total = subtotal + 0;
+  const { rows: recRows } = await query<{ total: number | null }>('SELECT total FROM receipts WHERE transaction_id = $1 LIMIT 1', [id]);
+  const receiptTotal = recRows[0]?.total != null ? Number(recRows[0].total) : null;
+  const billBeforeTip = receiptTotal != null && receiptTotal >= subtotal ? receiptTotal : subtotal;
+  const total = billBeforeTip + 0;
   const perPerson = total / memberIds.length;
   const rounded = memberIds.map(() => Math.round(perPerson * 100) / 100);
   const diff = Math.round((total - rounded.reduce((a, b) => a + b, 0)) * 100) / 100;

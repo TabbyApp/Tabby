@@ -46,11 +46,11 @@ A comprehensive, start-to-finish technical explanation of how every piece of the
 │  └── requireAuth middleware (JWT verification)                               │
 │  └── requireBankLinked middleware (group/create/transaction gating)          │
 │                                                                             │
-│  SQLite (better-sqlite3)                                                     │
-│  └── data/tabby.db (file-based, single writer)                               │
-│  └── Synchronous prepared statements                                         │
+│  PostgreSQL (pg)                                                             │
+│  └── DATABASE_URL; migrations in server/migrations/*.sql                     │
+│  └── Async queries (query(), withTransaction())                              │
 │                                                                             │
-│  TabScanner API (external)                                                   │
+│  Mindee API (external)                                                       │
 │  └── Receipt OCR: POST process → poll result → extract line items            │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -334,12 +334,12 @@ When `allocation_deadline_at <= now` and status is PENDING_ALLOCATION:
 
 ## 7. OCR & Receipt Processing
 
-### 7.1 TabScanner Flow
+### 7.1 Mindee OCR Flow
 
-1. **Process**: `POST https://api.tabscanner.com/api/2/process` with `apikey` header and multipart image
+1. **Enqueue**: `POST https://api-v2.mindee.net/v2/products/extraction/enqueue` with `Authorization: Token` header and multipart image
 2. **Response**: `{ token }` (or duplicateToken)
 3. **Wait**: 5.5 seconds
-4. **Poll**: `GET https://api.tabscanner.com/api/result/{token}` every 1s, up to 25s
+4. **Poll**: `GET {polling_url}` until Processed, then fetch `{result_url}` for extraction result
 5. **Parse**: When status=done, extract `result.lineItems` → `{ descClean, lineTotal }` → `{ name, price }[]`
 6. **Filter**: Skip empty names, invalid prices, names > 120 chars
 
@@ -356,7 +356,7 @@ When `allocation_deadline_at <= now` and status is PENDING_ALLOCATION:
 
 ### 7.3 Environment
 
-- `TABSCANNER_API_KEY` must be set in `server/.env` or OCR will throw
+- `MINDEE_API_KEY` must be set in `server/.env` or OCR will throw
 
 ---
 
@@ -472,7 +472,7 @@ type PageState = {
 
 | Variable            | Purpose                          |
 |---------------------|-----------------------------------|
-| TABSCANNER_API_KEY  | TabScanner OCR                    |
+| MINDEE_API_KEY  | Mindee OCR (custom extraction)    |
 | JWT_ACCESS_SECRET   | Sign/verify access tokens         |
 | JWT_REFRESH_SECRET  | Sign/verify refresh tokens        |
 | PORT                | Server port (default 3001)        |
@@ -495,14 +495,14 @@ type PageState = {
 | Path | Responsibility |
 |------|----------------|
 | `server/src/index.ts` | Express app, middleware, routes, timer job, dotenv |
-| `server/src/db.ts` | SQLite connection, schema (CREATE TABLE, ALTER) |
+| `server/src/db.ts` | PostgreSQL connection pool, query/withTransaction; schema via migrations |
 | `server/src/middleware/auth.ts` | JWT sign/verify, requireAuth, requireBankLinked |
 | `server/src/routes/auth.ts` | Signup, login, refresh, logout |
 | `server/src/routes/users.ts` | GET /me, link-bank, payment-methods |
 | `server/src/routes/groups.ts` | Groups CRUD, virtual cards, create transaction |
 | `server/src/routes/transactions.ts` | List, get, upload receipt, tip, claims, finalize, fallback, settle |
 | `server/src/routes/receipts.ts` | Legacy upload, list, get, items, claims, complete; receipts list includes transaction-linked |
-| `server/src/ocr.ts` | TabScanner process + poll, map to { name, price }[] |
+| `server/src/ocr.ts` | Mindee enqueue + poll + result, map to { name, price }[] |
 | `src/contexts/AuthContext.tsx` | user state, login, signup, logout, bootstrap from token |
 | `src/lib/api.ts` | request(), refresh on 401, all API methods |
 | `src/App.tsx` | pageState, conditional page render, auth gating |
