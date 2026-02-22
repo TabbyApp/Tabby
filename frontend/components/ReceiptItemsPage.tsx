@@ -113,6 +113,18 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     }).finally(() => setLoading(false));
   }, [receiptId, applyReceiptData]);
 
+  // Poll receipt status so when host completes, others see updated state without refresh
+  useEffect(() => {
+    if (!receiptId) return;
+    const interval = setInterval(() => {
+      api.receipts.get(receiptId).then((r) => {
+        applyReceiptData(r);
+        if (r.status === 'completed') refetchReceipt();
+      }).catch(() => {});
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [receiptId, applyReceiptData, refetchReceipt]);
+
   const reviewValidation = useMemo(
     () => (reviewReceipt ? validateReceipt(reviewReceipt) : null),
     [reviewReceipt]
@@ -689,23 +701,30 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
               ⚠️ All items must be selected before submitting
             </p>
           )}
+          {user?.id !== uploadedBy && uploadedBy && (
+            <p className={`text-xs mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Only the receipt uploader can confirm. Select your items; the host will complete payment.
+            </p>
+          )}
         </div>
-        <button
-          onClick={handleSubmitClick}
-          disabled={!allItemsSelected}
-          className={`w-full py-4 rounded-xl font-semibold shadow-lg transition-all ${
-            allItemsSelected
-              ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white active:scale-[0.98]'
-              : isDark 
-                ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          Confirm Selections
-        </button>
+        {user?.id === uploadedBy ? (
+          <button
+            onClick={handleSubmitClick}
+            disabled={!allItemsSelected}
+            className={`w-full py-4 rounded-xl font-semibold shadow-lg transition-all ${
+              allItemsSelected
+                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white active:scale-[0.98]'
+                : isDark 
+                  ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+          >
+            Confirm Selections
+          </button>
+        ) : null}
       </div>
 
-      {/* Confirmation Modal */}
+      {/* Confirmation Modal - only uploader can open (button above is hidden for others) */}
       {showConfirmation && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-5 z-50">
           <motion.div 

@@ -938,17 +938,24 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     </div>
                   </motion.div>
 
-                  {/* Complete Payment Button */}
-                  <motion.button
-                    initial={{ y: 6, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.12 }}
-                    onClick={handleCompletePayment}
-                    disabled={settlingPayment}
-                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
-                  >
-                    {settlingPayment ? 'Processing...' : `Complete Payment • $${yourShare.toFixed(2)}`}
-                  </motion.button>
+                  {/* Complete Payment - creator only */}
+                  {isCreator && (
+                    <motion.button
+                      initial={{ y: 6, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ duration: 0.12 }}
+                      onClick={handleCompletePayment}
+                      disabled={settlingPayment}
+                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
+                    >
+                      {settlingPayment ? 'Processing...' : `Complete Payment • $${yourShare.toFixed(2)}`}
+                    </motion.button>
+                  )}
+                  {!isCreator && (
+                    <p className={`text-sm text-center py-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      Only the group creator can complete payment.
+                    </p>
+                  )}
                 </>
               )}
             </motion.div>
@@ -980,7 +987,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-lg`}>Items Selected</p>
                         <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Your items from receipt</p>
                       </div>
-                      {receiptForItemSplit && (
+                      {receiptForItemSplit && isCreator && (
                         <button
                           onClick={() => groupId && onNavigateToReceiptItems?.(groupId, receiptForItemSplit.id)}
                           className="text-violet-600 font-semibold text-sm"
@@ -1014,64 +1021,72 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     </div>
                   </motion.div>
 
-                  {/* Tip Slider - Item Split */}
-                  <motion.div
-                    initial={{ y: 6, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.12 }}
-                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <DollarSign size={20} className="text-amber-500" />
-                        <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Add Tip</h3>
-                      </div>
-                      <span className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
-                        {tipPercentage}%
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-4 gap-2 mb-4">
-                      {[10, 15, 18, 20].map((tip) => (
-                        <button
-                          key={tip}
-                          onClick={() => setTipPercentage(tip)}
-                          className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
-                            tipPercentage === tip
-                              ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
-                              : `${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'}`
-                          }`}
-                        >
-                          {tip}%
-                        </button>
-                      ))}
-                    </div>
-                    <div className="relative">
-                      <input
-                        type="range" min="0" max="30" value={tipPercentage}
-                        onChange={(e) => setTipPercentage(parseInt(e.target.value))}
-                        className="w-full h-2 rounded-full appearance-none cursor-pointer"
-                        style={{
-                          background: `linear-gradient(to right, rgb(139, 92, 246) 0%, rgb(168, 85, 247) ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} 100%)`
-                        }}
-                      />
-                      <div className="flex justify-between mt-2">
-                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>0%</span>
-                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>30%</span>
-                      </div>
-                    </div>
-                  </motion.div>
+                  {/* Tip Slider & Complete Payment - creator only (item split) */}
+                  {isCreator && (
+                    <>
+                      <motion.div
+                        initial={{ y: 6, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ duration: 0.12 }}
+                        className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
+                      >
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                            <DollarSign size={20} className="text-amber-500" />
+                            <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Add Tip</h3>
+                          </div>
+                          <span className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+                            {tipPercentage}%
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 mb-4">
+                          {[10, 15, 18, 20].map((tip) => (
+                            <button
+                              key={tip}
+                              onClick={() => setTipPercentage(tip)}
+                              className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
+                                tipPercentage === tip
+                                  ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
+                                  : `${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'}`
+                              }`}
+                            >
+                              {tip}%
+                            </button>
+                          ))}
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="range" min="0" max="30" value={tipPercentage}
+                            onChange={(e) => setTipPercentage(parseInt(e.target.value))}
+                            className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                            style={{
+                              background: `linear-gradient(to right, rgb(139, 92, 246) 0%, rgb(168, 85, 247) ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} 100%)`
+                            }}
+                          />
+                          <div className="flex justify-between mt-2">
+                            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>0%</span>
+                            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>30%</span>
+                          </div>
+                        </div>
+                      </motion.div>
 
-                  {/* Complete Payment Button - Item Split */}
-                  <motion.button
-                    initial={{ y: 6, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.12 }}
-                    onClick={handleCompletePayment}
-                    disabled={settlingPayment}
-                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
-                  >
-                    {settlingPayment ? 'Processing...' : `Complete Payment • $${totalWithTip.toFixed(2)}`}
-                  </motion.button>
+                      <motion.button
+                        initial={{ y: 6, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        transition={{ duration: 0.12 }}
+                        onClick={handleCompletePayment}
+                        disabled={settlingPayment}
+                        className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
+                      >
+                        {settlingPayment ? 'Processing...' : `Complete Payment • $${totalWithTip.toFixed(2)}`}
+                      </motion.button>
+                    </>
+                  )}
+                  {!isCreator && (
+                    <p className={`text-sm text-center py-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      Only the group creator can add tip and complete payment.
+                    </p>
+                  )}
                 </>
               ) : hasPendingReceipt ? (
                 <motion.div

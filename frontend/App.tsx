@@ -187,6 +187,15 @@ export default function App() {
     setInitialDataLoaded(true);
   }, [authLoading, user, bootstrapGroups, bootstrapCards]);
 
+  // Poll groups so create/delete by other users (or other tabs) shows up without restart
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      loadGroups();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [user, loadGroups]);
+
   const acceptInvite = (inviteId: number) => {
     setPendingInvites(prev => prev.filter(inv => inv.id !== inviteId));
     loadGroups();
