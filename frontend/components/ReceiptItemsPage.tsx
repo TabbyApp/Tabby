@@ -1,10 +1,11 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, Check, AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { PageType } from '../App';
 import { api, type ParsedReceipt } from '../lib/api';
 import { validateReceipt } from '../lib/receiptValidation';
 import { useAuth } from '../contexts/AuthContext';
+import { useReceiptClaimsRealtime } from '../hooks/useReceiptClaimsRealtime';
 
 interface ReceiptItemsPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
@@ -52,6 +53,53 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
   const [confirmingReview, setConfirmingReview] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
+  const applyReceiptData = useCallback((data: any) => {
+    setRealReceiptId(data.id);
+    setUploadedBy((data as { uploaded_by?: string }).uploaded_by ?? null);
+    const rt = (data as { total?: number | null }).total;
+    setReceiptTotal(rt != null && !Number.isNaN(Number(rt)) ? Number(rt) : null);
+    setReceiptStatus(data.status || '');
+    if (data.confidence_map) setConfidenceMap(data.confidence_map);
+    if (data.status === 'NEEDS_REVIEW' && data.parsed_output) {
+      setReviewReceipt({
+        merchantName: data.parsed_output.merchantName,
+        receiptDate: data.parsed_output.receiptDate ?? null,
+        totals: { ...data.parsed_output.totals },
+        lineItems: data.parsed_output.lineItems.map((i) => ({ ...i })),
+      });
+    } else {
+      setReviewReceipt(null);
+    }
+    const mappedMembers = data.members.map((m: { id: string; name: string }, i: number) => ({
+      id: i + 1,
+      name: m.id === user?.id ? 'You' : m.name,
+      avatar: MEMBER_AVATARS[i % MEMBER_AVATARS.length],
+      _realId: m.id,
+    }));
+    setMembers(mappedMembers);
+    const mappedItems = data.items.map((item: { id: string; name: string; price: number }, i: number) => {
+      const claimUserIds = data.claims[item.id] ?? [];
+      const selectedBy = claimUserIds
+        .map((uid: string) => mappedMembers.find(m => m._realId === uid)?.id)
+        .filter((id): id is number => id !== undefined);
+      return {
+        id: i + 1,
+        name: item.name,
+        price: item.price,
+        selectedBy,
+        _realId: item.id,
+      };
+    });
+    setItems(mappedItems);
+  }, [user?.id]);
+
+  const refetchReceipt = useCallback(() => {
+    if (!receiptId) return;
+    api.receipts.get(receiptId).then(applyReceiptData).catch(() => {});
+  }, [receiptId, applyReceiptData]);
+
+  useReceiptClaimsRealtime(receiptId ?? null, refetchReceipt);
+
   // Load receipt data from backend if receiptId is provided
   useEffect(() => {
     if (!receiptId) {
@@ -60,48 +108,10 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
       return;
     }
     setLoading(true);
-    api.receipts.get(receiptId).then((data) => {
-      setRealReceiptId(data.id);
-      setUploadedBy((data as { uploaded_by?: string }).uploaded_by ?? null);
-      const rt = (data as { total?: number | null }).total;
-      setReceiptTotal(rt != null && !Number.isNaN(Number(rt)) ? Number(rt) : null);
-      setReceiptStatus(data.status || '');
-      if (data.confidence_map) setConfidenceMap(data.confidence_map);
-      if (data.status === 'NEEDS_REVIEW' && data.parsed_output) {
-        setReviewReceipt({
-          merchantName: data.parsed_output.merchantName,
-          receiptDate: data.parsed_output.receiptDate ?? null,
-          totals: { ...data.parsed_output.totals },
-          lineItems: data.parsed_output.lineItems.map((i) => ({ ...i })),
-        });
-      } else {
-        setReviewReceipt(null);
-      }
-      const mappedMembers = data.members.map((m, i) => ({
-        id: i + 1,
-        name: m.id === user?.id ? 'You' : m.name,
-        avatar: MEMBER_AVATARS[i % MEMBER_AVATARS.length],
-        _realId: m.id,
-      }));
-      setMembers(mappedMembers);
-      const mappedItems = data.items.map((item, i) => {
-        const claimUserIds = data.claims[item.id] ?? [];
-        const selectedBy = claimUserIds
-          .map(uid => mappedMembers.find(m => m._realId === uid)?.id)
-          .filter((id): id is number => id !== undefined);
-        return {
-          id: i + 1,
-          name: item.name,
-          price: item.price,
-          selectedBy,
-          _realId: item.id,
-        };
-      });
-      setItems(mappedItems);
-    }).catch(() => {
+    api.receipts.get(receiptId).then(applyReceiptData).catch(() => {
       setItems([]);
     }).finally(() => setLoading(false));
-  }, [receiptId, user?.id]);
+  }, [receiptId, applyReceiptData]);
 
   const reviewValidation = useMemo(
     () => (reviewReceipt ? validateReceipt(reviewReceipt) : null),

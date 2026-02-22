@@ -1,12 +1,13 @@
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, Users, Receipt, Trash2, UserMinus, LogOut, Plus, MoreVertical, UserPlus, DollarSign, Check, Copy, Link2, CreditCard } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { PageType } from '../App';
 import { BottomNavigation } from './BottomNavigation';
 import { ProfileSheet } from './ProfileSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { api, assetUrl } from '../lib/api';
 import { getCachedGroupDetail, setCachedGroupDetail, invalidateGroupCache } from '../lib/groupCache';
+import { useReceiptClaimsRealtime } from '../hooks/useReceiptClaimsRealtime';
 
 interface GroupDetailPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
@@ -249,16 +250,53 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
     }).catch(() => {});
   }, [groupId, lastSettledAt, lastSettledAllocations.length, lastSettledBreakdown]);
 
-  // Poll for updates so members see host's split mode changes
+  // Poll for group + receipts so other members see new uploads (e.g. pending receipt for item split)
   useEffect(() => {
     if (!groupId) return;
     const interval = setInterval(() => {
-      api.groups.get(groupId).then((groupData) => {
-        setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
-      }).catch(() => {});
-    }, 15000); // every 15 seconds
+      Promise.all([
+        api.groups.get(groupId).catch(() => null),
+        api.receipts.list(groupId).catch(() => [] as any[]),
+      ]).then(([groupData, receiptsData]) => {
+        if (groupData) {
+          setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
+        }
+        const receipts = receiptsData ?? [];
+        setRealReceipts(receipts);
+        const latest = receipts.find((r: any) => r.total != null);
+        if (latest?.total) {
+          setReceiptTotal(latest.total);
+          setHasReceipt(true);
+        }
+        if (groupData) {
+          const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
+          setCachedGroupDetail(groupId, {
+            members: groupData.members,
+            createdBy: groupData.created_by,
+            inviteToken: groupData.inviteToken,
+            receipts,
+            lastSettledAt: g.lastSettledAt ?? null,
+            lastSettledAllocations: g.lastSettledAllocations,
+            lastSettledBreakdown: g.lastSettledBreakdown,
+            lastSettledItemsPerUser: g.lastSettledItemsPerUser,
+            supportCode: g.supportCode ?? null,
+            cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
+            splitModePreference: g.splitModePreference ?? 'item',
+          });
+        }
+      });
+    }, 10000); // every 10 seconds so other members see new receipt within ~10s
     return () => clearInterval(interval);
   }, [groupId]);
+
+  const refetchReceiptDetail = useCallback(() => {
+    if (!latestPendingReceipt?.id) return;
+    api.receipts.get(latestPendingReceipt.id).then((data: any) => {
+      setReceiptDetail({ items: data.items ?? [], claims: data.claims ?? {}, members: data.members ?? [] });
+    }).catch(() => setReceiptDetail(null));
+  }, [latestPendingReceipt?.id]);
+
+  useReceiptClaimsRealtime(latestPendingReceipt?.id ?? null, refetchReceiptDetail);
 
   // Fetch receipt detail (items + claims) for pending receipt to show member selections
   useEffect(() => {

@@ -2,6 +2,7 @@
  * Seed script: creates test@tabby.com with demo groups for UI testing.
  * Run: npm run seed (or tsx src/seed.ts)
  */
+import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { query } from './db.js';

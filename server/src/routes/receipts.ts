@@ -537,10 +537,10 @@ receiptsRouter.put('/:receiptId/items/:itemId/claims', requireAuth, async (req, 
     );
     const validIds = memberRows.map((r) => r.user_id);
     if (validIds.length > 0) {
-      const placeholders = validIds.map((_, i) => `($1, $${i + 2})`).join(', ');
+      const placeholders = validIds.map((_, i) => `($1, $${i + 2}, $${validIds.length + 2})`).join(', ');
       await query(
-        `INSERT INTO item_claims (receipt_item_id, user_id) VALUES ${placeholders} ON CONFLICT (receipt_item_id, user_id) DO NOTHING`,
-        [itemId, ...validIds]
+        `INSERT INTO item_claims (receipt_item_id, user_id, receipt_id) VALUES ${placeholders} ON CONFLICT (receipt_item_id, user_id) DO NOTHING`,
+        [itemId, ...validIds, receiptId]
       );
     }
   }
