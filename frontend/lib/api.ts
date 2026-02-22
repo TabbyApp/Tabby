@@ -200,7 +200,7 @@ export const api = {
         body: JSON.stringify({ name, memberEmails }),
       }),
     get: (groupId: string) =>
-      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; avatarUrl?: string }[]; cardLastFour: string | null; inviteToken: string | null; supportCode: string | null; lastSettledAt: string | null; splitModePreference?: string }>(
+      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; avatarUrl?: string }[]; cardLastFour: string | null; inviteToken: string | null; supportCode: string | null; lastSettledAt: string | null; splitModePreference?: string; pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number }; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]> }>(
         `/groups/${groupId}`
       ),
     /** Batch fetch group details - 1 request instead of N (avoids connection queueing) */
@@ -226,6 +226,8 @@ export const api = {
       request<{ ok: boolean }>(`/groups/${groupId}/members/${memberId}`, { method: 'DELETE' }),
     updateSplitModePreference: (groupId: string, splitModePreference: 'even' | 'item') =>
       request<{ ok: boolean }>(`/groups/${groupId}`, { method: 'PUT', body: JSON.stringify({ splitModePreference }) }),
+    updateDraftTip: (groupId: string, draftTipPercentage: number) =>
+      request<{ ok: boolean }>(`/groups/${groupId}`, { method: 'PATCH', body: JSON.stringify({ draftTipPercentage }) }),
     virtualCards: () =>
       request<{ groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[]>(
         '/groups/virtual-cards/list'

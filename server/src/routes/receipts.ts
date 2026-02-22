@@ -604,6 +604,12 @@ receiptsRouter.post('/:receiptId/complete', requireAuth, async (req, res) => {
 
   await query('UPDATE receipts SET status = $1 WHERE id = $2', ['completed', receiptId]);
 
+  // Set group draft tip so all members see the same "add tip" screen (host slides, members see it live)
+  await query(
+    'UPDATE groups SET draft_receipt_id = $1, draft_tip_percentage = $2 WHERE id = $3',
+    [receiptId, 15, receipt.group_id]
+  );
+
   const { rows: splits } = await query<{ user_id: string; amount: number; name: string }>(`
     SELECT rs.user_id, rs.amount, u.name
     FROM receipt_splits rs

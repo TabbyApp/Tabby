@@ -119,9 +119,14 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     if (!receiptId || !groupId || lastGroupUpdatedId !== groupId || lastGroupUpdatedAt === 0) return;
     api.receipts.get(receiptId).then((r) => {
       applyReceiptData(r);
-      if (r.status === 'completed') refetchReceipt();
+      if (r.status === 'completed') {
+        refetchReceipt();
+        // Reroute members to group detail so they see the same "add tip" view as the host (read-only tip, their total)
+        onSelectionConfirmed?.(groupId);
+        onNavigate('groupDetail', groupId);
+      }
     }).catch(() => {});
-  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, receiptId, applyReceiptData, refetchReceipt]);
+  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, receiptId, applyReceiptData, refetchReceipt, onNavigate]);
 
   const reviewValidation = useMemo(
     () => (reviewReceipt ? validateReceipt(reviewReceipt) : null),
