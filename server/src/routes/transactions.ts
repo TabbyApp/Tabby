@@ -414,6 +414,7 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
     amount: a.amount,
     name: nameMap.get(a.user_id) ?? 'Unknown',
   }));
+  await query('UPDATE groups SET draft_receipt_id = NULL, draft_tip_percentage = NULL WHERE id = $1', [tx.group_id]);
   void emitToGroup(tx.group_id, 'group:updated', { groupId: tx.group_id });
   res.json({ ok: true, allocations: withNames, status: 'SETTLED' });
 });

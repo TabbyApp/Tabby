@@ -6,9 +6,9 @@ import { BottomNavigation } from './BottomNavigation';
 import { ProfileSheet } from './ProfileSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
+import { useReceiptClaimsRealtime } from '../hooks/useReceiptClaimsRealtime';
 import { api, assetUrl } from '../lib/api';
 import { getCachedGroupDetail, setCachedGroupDetail, invalidateGroupCache } from '../lib/groupCache';
-import { useReceiptClaimsRealtime } from '../hooks/useReceiptClaimsRealtime';
 
 interface GroupDetailPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
@@ -100,15 +100,16 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   
   const [splitMode, setSplitMode] = useState<'even' | 'item'>(receiptData ? 'item' : 'even');
   const [tipPercentage, setTipPercentage] = useState(15);
+  const [pendingItemSplit, setPendingItemSplit] = useState<{ receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } | null>(null);
   const cachedForInit = groupId ? getCachedGroupDetail(groupId) : null;
   const [serverSplitModePreference, setServerSplitModePreference] = useState<string | null>(cachedForInit?.splitModePreference ?? null);
   const [hasReceipt, setHasReceipt] = useState(false);
   const [receiptTotal, setReceiptTotal] = useState(0);
   const [settlingPayment, setSettlingPayment] = useState(false);
   
-  const hasSelectedItems = itemSplitData.hasSelectedItems;
-  const yourItemsSubtotal = itemSplitData.yourItemsTotal;
-  const receiptTotalFromReceipt = itemSplitData.receiptTotal;
+  const hasSelectedItems = !!pendingItemSplit || itemSplitData.hasSelectedItems;
+  const yourItemsSubtotal = pendingItemSplit?.myAmount ?? itemSplitData.yourItemsTotal;
+  const receiptTotalFromReceipt = pendingItemSplit?.receiptTotal ?? itemSplitData.receiptTotal;
   const itemsSubtotal = itemSplitData.subtotal ?? yourItemsSubtotal;
   const tax = (receiptTotalFromReceipt != null && itemsSubtotal > 0 && receiptTotalFromReceipt >= itemsSubtotal)
     ? receiptTotalFromReceipt - itemsSubtotal
@@ -122,6 +123,13 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       setSplitMode('item');
     }
   }, [receiptData]);
+
+  // Sync tip % from server when pendingItemSplit changes (members see host's slider in real time)
+  useEffect(() => {
+    if (pendingItemSplit?.draftTipPercentage != null) {
+      setTipPercentage(pendingItemSplit.draftTipPercentage);
+    }
+  }, [pendingItemSplit?.draftTipPercentage]);
 
   // Sync splitMode from server preference (so all members see host's choice)
   useEffect(() => {
@@ -192,6 +200,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       setSupportCode(freshCache.supportCode ?? null);
       setCardLastFour(freshCache.cardLastFour ?? null);
       setServerSplitModePreference(freshCache.splitModePreference ?? null);
+      setPendingItemSplit((freshCache as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null);
       const latestCached = freshCache.receipts.find((r: any) => r.total != null);
       if (latestCached?.total) {
         setReceiptTotal(latestCached.total);
@@ -219,6 +228,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setSupportCode((groupData as { supportCode?: string | null }).supportCode ?? null);
         setCardLastFour(groupData.cardLastFour ?? null);
         setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
+        setPendingItemSplit((groupData as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null);
       }
       const receipts = receiptsData ?? [];
       setRealReceipts(receipts);
@@ -229,7 +239,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       }
       // Store in shared cache
       if (groupData) {
-        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
+        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string; pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } };
         setCachedGroupDetail(groupId, {
           members: groupData.members,
           createdBy: groupData.created_by,
@@ -242,6 +252,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           supportCode: g.supportCode ?? null,
           cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
           splitModePreference: g.splitModePreference ?? 'item',
+          pendingItemSplit: g.pendingItemSplit ?? undefined,
         });
       }
     });
@@ -265,6 +276,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setSupportCode((groupData as { supportCode?: string | null }).supportCode ?? null);
         setCardLastFour(groupData.cardLastFour ?? null);
         setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
+        setPendingItemSplit((groupData as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null);
       }
       const receipts = receiptsData ?? [];
       setRealReceipts(receipts);
@@ -284,7 +296,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setReceiptDetail(null);
       }
       if (groupData) {
-        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
+        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string; pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } };
         setCachedGroupDetail(groupId, {
           members: groupData.members,
           createdBy: groupData.created_by,
@@ -297,6 +309,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           supportCode: g.supportCode ?? null,
           cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
           splitModePreference: g.splitModePreference ?? 'item',
+          pendingItemSplit: g.pendingItemSplit ?? undefined,
         });
       }
     });
@@ -1043,29 +1056,35 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     </div>
                   </motion.div>
 
-                  {/* Tip Slider & Complete Payment - creator only (item split) */}
-                  {isCreator && (
-                    <>
-                      <motion.div
-                        initial={{ y: 6, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.12 }}
-                        className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
-                      >
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-2">
-                            <DollarSign size={20} className="text-amber-500" />
-                            <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Add Tip</h3>
-                          </div>
-                          <span className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
-                            {tipPercentage}%
-                          </span>
-                        </div>
+                  {/* Tip: host can change (syncs to server); members see it update in real time */}
+                  <motion.div
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <DollarSign size={20} className="text-amber-500" />
+                        <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{isCreator ? 'Add Tip' : 'Tip'}</h3>
+                      </div>
+                      <span className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+                        {tipPercentage}%
+                      </span>
+                    </div>
+                    {isCreator ? (
+                      <>
                         <div className="grid grid-cols-4 gap-2 mb-4">
                           {[10, 15, 18, 20].map((tip) => (
                             <button
                               key={tip}
-                              onClick={() => setTipPercentage(tip)}
+                              onClick={() => {
+                                setTipPercentage(tip);
+                                if (groupId && pendingItemSplit) {
+                                  invalidateGroupCache(groupId);
+                                  api.groups.updateDraftTip(groupId, tip).catch(() => {});
+                                }
+                              }}
                               className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
                                 tipPercentage === tip
                                   ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
@@ -1079,7 +1098,14 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         <div className="relative">
                           <input
                             type="range" min="0" max="30" value={tipPercentage}
-                            onChange={(e) => setTipPercentage(parseInt(e.target.value))}
+                            onChange={(e) => {
+                              const v = parseInt(e.target.value);
+                              setTipPercentage(v);
+                              if (groupId && pendingItemSplit) {
+                                invalidateGroupCache(groupId);
+                                api.groups.updateDraftTip(groupId, v).catch(() => {});
+                              }
+                            }}
                             className="w-full h-2 rounded-full appearance-none cursor-pointer"
                             style={{
                               background: `linear-gradient(to right, rgb(139, 92, 246) 0%, rgb(168, 85, 247) ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} 100%)`
@@ -1090,23 +1116,29 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                             <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>30%</span>
                           </div>
                         </div>
-                      </motion.div>
+                      </>
+                    ) : (
+                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        Host is setting the tip. Your total updates above.
+                      </p>
+                    )}
+                  </motion.div>
 
-                      <motion.button
-                        initial={{ y: 6, opacity: 0 }}
-                        animate={{ y: 0, opacity: 1 }}
-                        transition={{ duration: 0.12 }}
-                        onClick={handleCompletePayment}
-                        disabled={settlingPayment}
-                        className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
-                      >
-                        {settlingPayment ? 'Processing...' : `Complete Payment • $${totalWithTip.toFixed(2)}`}
-                      </motion.button>
-                    </>
+                  {isCreator && (
+                    <motion.button
+                      initial={{ y: 6, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ duration: 0.12 }}
+                      onClick={handleCompletePayment}
+                      disabled={settlingPayment}
+                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
+                    >
+                      {settlingPayment ? 'Processing...' : `Complete Payment • $${totalWithTip.toFixed(2)}`}
+                    </motion.button>
                   )}
                   {!isCreator && (
                     <p className={`text-sm text-center py-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Only the group creator can add tip and complete payment.
+                      Only the group creator can complete payment.
                     </p>
                   )}
                 </>

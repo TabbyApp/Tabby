@@ -333,8 +333,9 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
 
-  const { rows } = await query<{ id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number; support_code: string | null; last_settled_at: string | null; split_mode_preference: string }>(`
+  const { rows } = await query<{ id: string; name: string; created_by: string; created_at: string; invite_token: string | null; card_number_last_four: string | null; is_member: number; support_code: string | null; last_settled_at: string | null; split_mode_preference: string; draft_tip_percentage: number | null; draft_receipt_id: string | null }>(`
     SELECT g.id, g.name, g.created_by, g.created_at, g.invite_token, g.support_code, g.last_settled_at, g.split_mode_preference,
+           g.draft_tip_percentage, g.draft_receipt_id,
            vc.card_number_last_four,
            (SELECT COUNT(*)::int FROM group_members WHERE group_id = g.id AND user_id = $1) as is_member
     FROM groups g
@@ -411,6 +412,19 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
     }
   }
 
+  let pendingItemSplit: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } | undefined;
+  if (row.draft_receipt_id) {
+    const { rows: recRow } = await query<{ total: number | null }>('SELECT total FROM receipts WHERE id = $1', [row.draft_receipt_id]);
+    const receiptTotal = recRow[0]?.total != null ? Number(recRow[0].total) : 0;
+    const { rows: splitRow } = await query<{ amount: number }>(
+      'SELECT amount FROM receipt_splits WHERE receipt_id = $1 AND user_id = $2',
+      [row.draft_receipt_id, userId]
+    );
+    const myAmount = splitRow[0]?.amount != null ? Number(splitRow[0].amount) : 0;
+    const draftTip = row.draft_tip_percentage != null ? Number(row.draft_tip_percentage) : 15;
+    pendingItemSplit = { receiptId: row.draft_receipt_id, receiptTotal, myAmount, draftTipPercentage: draftTip };
+  }
+
   res.json({
     id: row.id, name: row.name, created_by: row.created_by, created_at: row.created_at,
     members: members.map((m) => ({ ...m, avatarUrl: m.avatar_url })),
@@ -420,6 +434,7 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
     lastSettledBreakdown: lastSettledBreakdown ?? undefined,
     lastSettledItemsPerUser: lastSettledItemsPerUser ?? undefined,
     splitModePreference: row.split_mode_preference ?? 'item',
+    pendingItemSplit: pendingItemSplit ?? undefined,
   });
 });
 
@@ -427,9 +442,9 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
 async function updateGroupHandler(req: any, res: any) {
   const { userId } = (req as any).user;
   const { groupId } = req.params;
-  const { splitModePreference } = req.body;
+  const { splitModePreference, draftTipPercentage } = req.body;
 
-  const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
+  const { rows: groupRows } = await query<{ created_by: string; draft_receipt_id: string | null }>('SELECT created_by, draft_receipt_id FROM groups WHERE id = $1', [groupId]);
   const group = groupRows[0];
   if (!group) return res.status(404).json({ error: 'Group not found' });
   if (group.created_by !== userId) return res.status(403).json({ error: 'Only the host can update this group' });
@@ -439,6 +454,13 @@ async function updateGroupHandler(req: any, res: any) {
       return res.status(400).json({ error: 'splitModePreference must be "even" or "item"' });
     }
     await query('UPDATE groups SET split_mode_preference = $1 WHERE id = $2', [splitModePreference, groupId]);
+  }
+
+  if (draftTipPercentage !== undefined) {
+    if (!group.draft_receipt_id) return res.status(400).json({ error: 'No pending item split to update tip for' });
+    const pct = Math.min(30, Math.max(0, Number(draftTipPercentage)));
+    if (Number.isNaN(pct)) return res.status(400).json({ error: 'draftTipPercentage must be a number' });
+    await query('UPDATE groups SET draft_tip_percentage = $1 WHERE id = $2', [Math.round(pct), groupId]);
   }
 
   res.json({ ok: true });

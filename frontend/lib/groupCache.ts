@@ -16,6 +16,7 @@ export interface CachedGroupDetail {
   supportCode?: string | null;
   cardLastFour?: string | null;
   splitModePreference?: string;
+  pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number };
   timestamp: number;
 }
 
@@ -51,7 +52,7 @@ export async function prefetchGroupDetail(groupId: string): Promise<void> {
       api.receipts.list(groupId).catch(() => []),
     ]);
     if (groupData) {
-      const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
+      const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string; pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } };
       setCachedGroupDetail(groupId, {
         members: groupData.members,
         createdBy: groupData.created_by,
@@ -64,6 +65,7 @@ export async function prefetchGroupDetail(groupId: string): Promise<void> {
         supportCode: g.supportCode ?? null,
         cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
         splitModePreference: g.splitModePreference ?? 'item',
+        pendingItemSplit: g.pendingItemSplit,
       });
     }
   } catch {
