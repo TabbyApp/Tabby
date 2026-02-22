@@ -350,6 +350,24 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
     }).catch(() => setReceiptDetail(null));
   }, [receiptForItemSplit?.id, groupId]);
 
+  // When we have a completed receipt (no tx yet), sync itemSplitData so members see correct yourItemsTotal and full subtotal (tax correct)
+  useEffect(() => {
+    if (!receiptDetail?.items?.length || !receiptForItemSplit || receiptForItemSplit.status !== 'completed' || receiptForItemSplit.transaction_id || !user?.id) return;
+    const fullSubtotal = receiptDetail.items.reduce((s, i) => s + i.price, 0);
+    let myAmount = 0;
+    for (const item of receiptDetail.items) {
+      const userIds = receiptDetail.claims[item.id] ?? [];
+      if (userIds.includes(user.id)) myAmount += item.price / userIds.length;
+    }
+    const receiptTotalVal = receiptForItemSplit.total != null && receiptForItemSplit.total >= fullSubtotal ? receiptForItemSplit.total : fullSubtotal;
+    setItemSplitData({
+      hasSelectedItems: true,
+      yourItemsTotal: myAmount,
+      receiptTotal: receiptTotalVal,
+      subtotal: fullSubtotal,
+    });
+  }, [receiptDetail, receiptForItemSplit, user?.id, setItemSplitData]);
+
   const isCreator = realCreatedBy ? realCreatedBy === user?.id : currentGroup?.createdBy === currentUserId;
   // When pending receipt exists, non-hosts are locked to item split; host can always choose
   const splitModeLocked = hasPendingReceipt && !isCreator;
