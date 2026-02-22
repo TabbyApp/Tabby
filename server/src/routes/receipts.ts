@@ -530,6 +530,12 @@ receiptsRouter.put('/:receiptId/items/:itemId/claims', requireAuth, async (req, 
     return res.status(404).json({ error: 'Receipt not found' });
   }
 
+  // Only the host (uploader) may change claims while receipt is in NEEDS_REVIEW/UPLOADED; members wait until host confirms (DONE)
+  const uploaderId = (receipt as { uploaded_by?: string }).uploaded_by;
+  if (['NEEDS_REVIEW', 'UPLOADED'].includes(receipt.status) && uploaderId !== userId) {
+    return res.status(403).json({ error: 'Wait for the host to confirm the receipt before selecting items' });
+  }
+
   const { rows: itemRows } = await query<{ id: string }>('SELECT id FROM receipt_items WHERE id = $1 AND receipt_id = $2', [itemId, receiptId]);
   if (itemRows.length === 0) {
     return res.status(404).json({ error: 'Item not found' });
@@ -597,6 +603,12 @@ receiptsRouter.post('/:receiptId/complete', requireAuth, async (req, res) => {
   }
 
   await query('UPDATE receipts SET status = $1 WHERE id = $2', ['completed', receiptId]);
+
+  // Set group draft tip so all members see the same "add tip" screen (host slides, members see it live)
+  await query(
+    'UPDATE groups SET draft_receipt_id = $1, draft_tip_percentage = $2 WHERE id = $3',
+    [receiptId, 15, receipt.group_id]
+  );
 
   const { rows: splits } = await query<{ user_id: string; amount: number; name: string }>(`
     SELECT rs.user_id, rs.amount, u.name

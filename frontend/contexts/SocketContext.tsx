@@ -7,6 +7,8 @@ type SocketContextValue = {
   lastGroupUpdatedId: string | null;
   /** Timestamp when group:updated was last emitted; use so each event triggers refetch even for same groupId */
   lastGroupUpdatedAt: number;
+  /** Timestamp when groups:changed was last emitted (e.g. someone joined/left); group detail should refetch when this changes */
+  groupsChangedAt: number;
   activityInvalidatedAt: number;
 };
 
@@ -29,6 +31,7 @@ export function SocketProvider({
 }: SocketProviderProps) {
   const [lastGroupUpdatedId, setLastGroupUpdatedId] = useState<string | null>(null);
   const [lastGroupUpdatedAt, setLastGroupUpdatedAt] = useState(0);
+  const [groupsChangedAt, setGroupsChangedAt] = useState(0);
   const [activityInvalidatedAt, setActivityInvalidatedAt] = useState(0);
   const socketRef = useRef<Socket | null>(null);
   const callbacksRef = useRef({ onGroupsChanged, onGroupUpdated, onActivityChanged });
@@ -50,6 +53,7 @@ export function SocketProvider({
     socketRef.current = socket;
 
     socket.on('groups:changed', () => {
+      setGroupsChangedAt(Date.now());
       callbacksRef.current.onGroupsChanged?.();
     });
 
@@ -74,7 +78,7 @@ export function SocketProvider({
   }, [enabled]);
 
   return (
-    <SocketContext.Provider value={{ lastGroupUpdatedId, lastGroupUpdatedAt, activityInvalidatedAt }}>
+    <SocketContext.Provider value={{ lastGroupUpdatedId, lastGroupUpdatedAt, groupsChangedAt, activityInvalidatedAt }}>
       {children}
     </SocketContext.Provider>
   );
@@ -82,6 +86,6 @@ export function SocketProvider({
 
 export function useSocket(): SocketContextValue {
   const ctx = useContext(SocketContext);
-  if (!ctx) return { lastGroupUpdatedId: null, lastGroupUpdatedAt: 0, activityInvalidatedAt: 0 };
+  if (!ctx) return { lastGroupUpdatedId: null, lastGroupUpdatedAt: 0, groupsChangedAt: 0, activityInvalidatedAt: 0 };
   return ctx;
 }

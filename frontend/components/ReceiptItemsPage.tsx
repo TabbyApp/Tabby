@@ -122,9 +122,14 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     if (!receiptId || !groupId || lastGroupUpdatedId !== groupId || lastGroupUpdatedAt === 0) return;
     api.receipts.get(receiptId).then((r) => {
       applyReceiptData(r);
-      if (r.status === 'completed') refetchReceipt();
+      if (r.status === 'completed') {
+        refetchReceipt();
+        // Reroute members to group detail so they see the same "add tip" view as the host (read-only tip, their total)
+        onSelectionConfirmed?.(groupId);
+        onNavigate('groupDetail', groupId);
+      }
     }).catch(() => {});
-  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, receiptId, applyReceiptData, refetchReceipt]);
+  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, receiptId, applyReceiptData, refetchReceipt, onNavigate]);
 
   const reviewValidation = useMemo(
     () => (reviewReceipt ? validateReceipt(reviewReceipt) : null),
@@ -516,6 +521,13 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
           </div>
         </div>
 
+        {waitingForHostConfirm && (
+          <div className={`mb-4 rounded-xl p-4 ${isDark ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
+            <p className={`text-sm font-medium ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>
+              Waiting for host to confirm receipt. You can select your items once they confirm.
+            </p>
+          </div>
+        )}
         {receiptStatus === 'FAILED' && realReceiptId && (
           <div className={`mb-4 rounded-xl p-4 flex items-center justify-between ${isDark ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
             <p className={`text-sm font-medium ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>Processing failed. You can retry or add items manually.</p>
