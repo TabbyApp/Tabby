@@ -156,7 +156,9 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const [cardLastFour, setCardLastFour] = useState<string | null>(null);
   const [receiptDetail, setReceiptDetail] = useState<{ items: { id: string; name: string; price: number }[]; claims: Record<string, string[]>; members: { id: string; name: string }[] } | null>(null);
 
-  const latestPendingReceipt = realReceipts.find((r: any) => r.status === 'pending');
+  // Receipt is "pending for item split" when uploaded and not yet completed (backend uses NEEDS_REVIEW after upload, not 'pending')
+  const PENDING_ITEM_SPLIT_STATUSES = ['pending', 'NEEDS_REVIEW', 'UPLOADED'];
+  const latestPendingReceipt = realReceipts.find((r: any) => PENDING_ITEM_SPLIT_STATUSES.includes(r.status));
   const hasPendingReceipt = !!latestPendingReceipt;
   // After item-split confirm, receipt becomes 'completed' so use latest completed receipt without transaction for Edit
   const latestCompletedReceiptNoTx = realReceipts.find((r: any) => r.status === 'completed' && !r.transaction_id);
