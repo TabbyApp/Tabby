@@ -1,4 +1,12 @@
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+/** API base: same-origin /api, or VITE_API_URL (normalized to end with /api so /auth/login → /api/auth/login). */
+function getApiBase(): string {
+  const raw = import.meta.env.VITE_API_URL;
+  if (!raw || typeof raw !== 'string') return '/api';
+  const base = raw.replace(/\/+$/, '');
+  if (!base.startsWith('http://') && !base.startsWith('https://')) return '/api';
+  return base.endsWith('/api') ? base : `${base}/api`;
+}
+const API_BASE = getApiBase();
 const TOKEN_KEY = 'tabby_access_token';
 
 /** Resolve server asset URL (e.g. /uploads/avatars/xxx) to full URL for img src */
