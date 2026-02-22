@@ -258,9 +258,13 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
     });
   }, [groupId]);
 
-  const { lastGroupUpdatedId, lastGroupUpdatedAt } = useSocket();
+  const { lastGroupUpdatedId, lastGroupUpdatedAt, groupsChangedAt } = useSocket();
+  // Refetch when this group was updated (receipt, tip, claims) or when any group list changed (e.g. someone joined/left)
   useEffect(() => {
-    if (!groupId || lastGroupUpdatedId !== groupId || lastGroupUpdatedAt === 0) return;
+    if (!groupId) return;
+    const groupJustUpdated = lastGroupUpdatedId === groupId && lastGroupUpdatedAt > 0;
+    const anyGroupsChanged = groupsChangedAt > 0;
+    if (!groupJustUpdated && !anyGroupsChanged) return;
     Promise.all([
       api.groups.get(groupId).catch(() => null),
       api.receipts.list(groupId).catch(() => [] as any[]),
@@ -313,7 +317,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         });
       }
     });
-  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt]);
+  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, groupsChangedAt]);
 
   // If view-only but breakdown missing (e.g. from batch cache), refetch once to get full settlement breakdown
   useEffect(() => {
