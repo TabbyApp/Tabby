@@ -150,10 +150,14 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
   const [newItemPrice, setNewItemPrice] = useState('');
   const [showConfirmation, setShowConfirmation] = useState(false);
 
+  // Only host can interact while receipt is in NEEDS_REVIEW/UPLOADED; after host confirms (DONE), everyone can select items
+  const canSelectItems = user?.id === uploadedBy || !['NEEDS_REVIEW', 'UPLOADED'].includes(receiptStatus);
+  const waitingForHostConfirm = !canSelectItems && !!uploadedBy && user?.id !== uploadedBy;
+
   const isSelectedMemberMe = members.some(m => m.id === selectedMember && m._realId === user?.id);
 
   const toggleItemSelection = (itemId: number) => {
-    if (!isSelectedMemberMe) return;
+    if (!canSelectItems || !isSelectedMemberMe) return;
     setItems(prevItems => prevItems.map(item => {
       if (item.id === itemId) {
         const alreadySelected = item.selectedBy.includes(selectedMember);
@@ -581,12 +585,12 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
               animate={{ x: 0, opacity: 1 }}
               transition={{ delay: index * 0.05, duration: 0.3 }}
               onClick={() => toggleItemSelection(item.id)}
-              disabled={!isSelectedMemberMe}
+              disabled={!canSelectItems || !isSelectedMemberMe}
               className={`w-full ${
                 isDark ? 'bg-slate-800' : 'bg-white'
               } rounded-xl p-4 shadow-sm transition-all ${
                 isSelected ? 'ring-2 ring-blue-500' : ''
-              } ${!isSelectedMemberMe ? 'opacity-75 cursor-default' : 'active:scale-[0.98]'}`}
+              } ${!canSelectItems || !isSelectedMemberMe ? 'opacity-75 cursor-default' : 'active:scale-[0.98]'}`}
             >
               <div className="flex items-start gap-3">
                 <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
