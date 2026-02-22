@@ -1,6 +1,6 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BottomNavigation } from './BottomNavigation';
 import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
@@ -19,13 +19,12 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
   >([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    setLoading(true);
-    Promise.all([
+  const fetchActivity = useCallback((): Promise<void> => {
+    return Promise.all([
       api.transactions.activity().catch(() => []),
       api.receipts.mySplits().catch(() => []),
     ]).then(([activity, splits]) => {
-      const txItems = activity.map((a) => {
+      const txItems = activity.map((a: { id: string; group_name: string; amount: number; created_at: string }) => {
         const date = new Date(a.created_at);
         const now = new Date();
         const diffH = Math.floor((now.getTime() - date.getTime()) / 3600000);
@@ -39,7 +38,7 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
           type: 'paid' as const,
         };
       });
-      const splitItems = splits.map((s) => {
+      const splitItems = splits.map((s: { id: string; group_name: string; amount: number; created_at: string; status: string }) => {
         const date = new Date(s.created_at);
         const now = new Date();
         const diffH = Math.floor((now.getTime() - date.getTime()) / 3600000);
@@ -54,12 +53,22 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
         };
       });
       const combined = [...txItems, ...splitItems].sort((a, b) => {
-        // Sort by time string (newest first) - simplified
         return 0;
       });
       setTransactions(combined.length > 0 ? combined : []);
-    }).finally(() => setLoading(false));
+    }).then(() => {});
   }, []);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchActivity().finally(() => setLoading(false));
+  }, [fetchActivity]);
+
+  // Poll so new settlements from other users show up without refresh
+  useEffect(() => {
+    const interval = setInterval(fetchActivity, 10000);
+    return () => clearInterval(interval);
+  }, [fetchActivity]);
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
