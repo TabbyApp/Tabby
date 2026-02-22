@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { BottomNavigation } from './BottomNavigation';
 import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
+import { useSocket } from '../contexts/SocketContext';
 import { api } from '../lib/api';
 
 interface ActivityPageProps {
@@ -64,11 +65,11 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
     fetchActivity().finally(() => setLoading(false));
   }, [fetchActivity]);
 
-  // Poll so new settlements from other users show up without refresh
+  const { activityInvalidatedAt } = useSocket();
   useEffect(() => {
-    const interval = setInterval(fetchActivity, 10000);
-    return () => clearInterval(interval);
-  }, [fetchActivity]);
+    if (activityInvalidatedAt === 0) return;
+    fetchActivity();
+  }, [activityInvalidatedAt, fetchActivity]);
 
   return (
     <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>

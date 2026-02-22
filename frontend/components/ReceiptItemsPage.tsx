@@ -5,6 +5,7 @@ import { PageType } from '../App';
 import { api, type ParsedReceipt } from '../lib/api';
 import { validateReceipt } from '../lib/receiptValidation';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import { useReceiptClaimsRealtime } from '../hooks/useReceiptClaimsRealtime';
 
 interface ReceiptItemsPageProps {
@@ -113,17 +114,14 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     }).finally(() => setLoading(false));
   }, [receiptId, applyReceiptData]);
 
-  // Poll receipt status so when host completes, others see updated state without refresh
+  const { lastGroupUpdatedId, lastGroupUpdatedAt } = useSocket();
   useEffect(() => {
-    if (!receiptId) return;
-    const interval = setInterval(() => {
-      api.receipts.get(receiptId).then((r) => {
-        applyReceiptData(r);
-        if (r.status === 'completed') refetchReceipt();
-      }).catch(() => {});
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [receiptId, applyReceiptData, refetchReceipt]);
+    if (!receiptId || !groupId || lastGroupUpdatedId !== groupId || lastGroupUpdatedAt === 0) return;
+    api.receipts.get(receiptId).then((r) => {
+      applyReceiptData(r);
+      if (r.status === 'completed') refetchReceipt();
+    }).catch(() => {});
+  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, receiptId, applyReceiptData, refetchReceipt]);
 
   const reviewValidation = useMemo(
     () => (reviewReceipt ? validateReceipt(reviewReceipt) : null),

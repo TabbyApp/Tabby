@@ -5,6 +5,7 @@ import { PageType } from '../App';
 import { BottomNavigation } from './BottomNavigation';
 import { ProfileSheet } from './ProfileSheet';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import { api, assetUrl } from '../lib/api';
 import { getCachedGroupDetail, setCachedGroupDetail, invalidateGroupCache } from '../lib/groupCache';
 import { useReceiptClaimsRealtime } from '../hooks/useReceiptClaimsRealtime';
@@ -241,6 +242,51 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
     });
   }, [groupId]);
 
+  const { lastGroupUpdatedId, lastGroupUpdatedAt } = useSocket();
+  useEffect(() => {
+    if (!groupId || lastGroupUpdatedId !== groupId || lastGroupUpdatedAt === 0) return;
+    Promise.all([
+      api.groups.get(groupId).catch(() => null),
+      api.receipts.list(groupId).catch(() => [] as any[]),
+    ]).then(([groupData, receiptsData]) => {
+      if (groupData) {
+        setRealMembers(groupData.members);
+        setRealCreatedBy(groupData.created_by);
+        setInviteToken(groupData.inviteToken);
+        setLastSettledAt((groupData as { lastSettledAt?: string | null }).lastSettledAt ?? null);
+        setLastSettledAllocations((groupData as { lastSettledAllocations?: { user_id: string; name: string; amount: number }[] }).lastSettledAllocations ?? []);
+        setLastSettledBreakdown((groupData as { lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }> }).lastSettledBreakdown ?? null);
+        setLastSettledItemsPerUser((groupData as { lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]> }).lastSettledItemsPerUser ?? null);
+        setSupportCode((groupData as { supportCode?: string | null }).supportCode ?? null);
+        setCardLastFour(groupData.cardLastFour ?? null);
+        setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
+      }
+      const receipts = receiptsData ?? [];
+      setRealReceipts(receipts);
+      const latest = receipts.find((r: any) => r.total != null);
+      if (latest?.total) {
+        setReceiptTotal(latest.total);
+        setHasReceipt(true);
+      }
+      if (groupData) {
+        const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
+        setCachedGroupDetail(groupId, {
+          members: groupData.members,
+          createdBy: groupData.created_by,
+          inviteToken: groupData.inviteToken,
+          receipts,
+          lastSettledAt: g.lastSettledAt ?? null,
+          lastSettledAllocations: g.lastSettledAllocations,
+          lastSettledBreakdown: g.lastSettledBreakdown,
+          lastSettledItemsPerUser: g.lastSettledItemsPerUser,
+          supportCode: g.supportCode ?? null,
+          cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
+          splitModePreference: g.splitModePreference ?? 'item',
+        });
+      }
+    });
+  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt]);
+
   // If view-only but breakdown missing (e.g. from batch cache), refetch once to get full settlement breakdown
   useEffect(() => {
     if (!groupId || !lastSettledAt || lastSettledAllocations.length === 0) return;
@@ -251,45 +297,6 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       if (g.lastSettledItemsPerUser) setLastSettledItemsPerUser(g.lastSettledItemsPerUser);
     }).catch(() => {});
   }, [groupId, lastSettledAt, lastSettledAllocations.length, lastSettledBreakdown]);
-
-  // Poll for group + receipts so other members see new uploads (e.g. pending receipt for item split)
-  useEffect(() => {
-    if (!groupId) return;
-    const interval = setInterval(() => {
-      Promise.all([
-        api.groups.get(groupId).catch(() => null),
-        api.receipts.list(groupId).catch(() => [] as any[]),
-      ]).then(([groupData, receiptsData]) => {
-        if (groupData) {
-          setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
-        }
-        const receipts = receiptsData ?? [];
-        setRealReceipts(receipts);
-        const latest = receipts.find((r: any) => r.total != null);
-        if (latest?.total) {
-          setReceiptTotal(latest.total);
-          setHasReceipt(true);
-        }
-        if (groupData) {
-          const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
-          setCachedGroupDetail(groupId, {
-            members: groupData.members,
-            createdBy: groupData.created_by,
-            inviteToken: groupData.inviteToken,
-            receipts,
-            lastSettledAt: g.lastSettledAt ?? null,
-            lastSettledAllocations: g.lastSettledAllocations,
-            lastSettledBreakdown: g.lastSettledBreakdown,
-            lastSettledItemsPerUser: g.lastSettledItemsPerUser,
-            supportCode: g.supportCode ?? null,
-            cardLastFour: groupData.cardLastFour ?? g.cardLastFour ?? null,
-            splitModePreference: g.splitModePreference ?? 'item',
-          });
-        }
-      });
-    }, 10000); // every 10 seconds so other members see new receipt within ~10s
-    return () => clearInterval(interval);
-  }, [groupId]);
 
   const refetchReceiptDetail = useCallback(() => {
     if (!latestPendingReceipt?.id) return;

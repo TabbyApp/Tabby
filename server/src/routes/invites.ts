@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { query, withTransaction } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { emitToGroup } from '../socket.js';
 
 export const invitesRouter = Router();
 
@@ -129,6 +130,8 @@ invitesRouter.post('/:token/accept', requireAuth, async (req, res) => {
     cardLastFour: group.card_number_last_four,
     members,
   });
+  void emitToGroup(invite.group_id, 'groups:changed', {});
+  void emitToGroup(invite.group_id, 'group:updated', { groupId: invite.group_id });
 });
 
 /**

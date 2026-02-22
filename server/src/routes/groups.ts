@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import { query, withTransaction } from '../db.js';
 import { requireAuth, requireBankLinked } from '../middleware/auth.js';
+import { emitToGroup, emitToUsers, getGroupMemberIds } from '../socket.js';
 
 export const groupsRouter = Router();
 
@@ -318,6 +319,8 @@ groupsRouter.post('/', requireAuth, requireBankLinked, async (req, res) => {
     inviteToken,
     supportCode,
   });
+  void emitToGroup(groupId, 'groups:changed', {});
+  void emitToGroup(groupId, 'group:updated', { groupId });
 });
 
 // Get single group with members (optimized: combined auth+group query)
@@ -434,6 +437,7 @@ async function updateGroupHandler(req: any, res: any) {
   }
 
   res.json({ ok: true });
+  void emitToGroup(groupId, 'group:updated', { groupId });
 }
 groupsRouter.patch('/:groupId', requireAuth, updateGroupHandler);
 groupsRouter.put('/:groupId', requireAuth, updateGroupHandler);
@@ -449,6 +453,8 @@ groupsRouter.post('/join/:token', requireAuth, requireBankLinked, async (req, re
 
   await query('INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT (group_id, user_id) DO NOTHING', [group.id, userId]);
   res.json({ groupId: group.id, groupName: group.name, joined: true });
+  void emitToGroup(group.id, 'groups:changed', {});
+  void emitToGroup(group.id, 'group:updated', { groupId: group.id });
 });
 
 // Delete group (host only)
@@ -460,6 +466,8 @@ groupsRouter.delete('/:groupId', requireAuth, async (req, res) => {
   const group = groupRows[0];
   if (!group) return res.status(404).json({ error: 'Group not found' });
   if (group.created_by !== userId) return res.status(403).json({ error: 'Only the host can delete this group' });
+
+  const memberIds = await getGroupMemberIds(groupId);
 
   await withTransaction(async (client) => {
     const { rows: receiptRows } = await client.query<{ id: string }>('SELECT id FROM receipts WHERE group_id = $1', [groupId]);
@@ -480,6 +488,7 @@ groupsRouter.delete('/:groupId', requireAuth, async (req, res) => {
     await client.query('DELETE FROM groups WHERE id = $1', [groupId]);
   });
 
+  emitToUsers(memberIds, 'groups:changed', {});
   res.json({ ok: true });
 });
 
@@ -496,8 +505,11 @@ groupsRouter.post('/:groupId/leave', requireAuth, async (req, res) => {
   const { rows: memberRows } = await query<{ id: string }>('SELECT 1 as id FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
   if (memberRows.length === 0) return res.status(404).json({ error: 'You are not a member of this group' });
 
+  const memberIds = await getGroupMemberIds(groupId);
   await query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, userId]);
   res.json({ ok: true });
+  emitToUsers(memberIds, 'groups:changed', {});
+  void emitToGroup(groupId, 'group:updated', { groupId });
 });
 
 // Remove member from group (host only)
@@ -514,8 +526,11 @@ groupsRouter.delete('/:groupId/members/:memberId', requireAuth, async (req, res)
   const { rows: memberRows } = await query<{ id: string }>('SELECT 1 as id FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, memberId]);
   if (memberRows.length === 0) return res.status(404).json({ error: 'Member not found in this group' });
 
+  const memberIds = await getGroupMemberIds(groupId);
   await query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, memberId]);
   res.json({ ok: true });
+  emitToUsers(memberIds, 'groups:changed', {});
+  void emitToGroup(groupId, 'group:updated', { groupId });
 });
 
 // Create transaction (on receipt upload or manual total entry). For FULL_CONTROL, optional receiptId links existing completed receipt.
@@ -558,6 +573,7 @@ groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, asyn
 
   const { rows } = await query('SELECT * FROM transactions WHERE id = $1', [id]);
   const row = rows[0] as any;
+  void emitToGroup(groupId, 'group:updated', { groupId });
   res.status(201).json({
     id: row.id,
     group_id: row.group_id,

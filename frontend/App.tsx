@@ -25,6 +25,7 @@ import { ForgotPasswordPage } from './components/ForgotPasswordPage';
 import { AcceptInvitePage } from './components/AcceptInvitePage';
 import { ProAccountPage } from './components/ProAccountPage';
 import { useAuth } from './contexts/AuthContext';
+import { SocketProvider } from './contexts/SocketContext';
 import { api } from './lib/api';
 import { prefetchAllGroupDetails, invalidateGroupCache } from './lib/groupCache';
 
@@ -187,15 +188,6 @@ export default function App() {
     setInitialDataLoaded(true);
   }, [authLoading, user, bootstrapGroups, bootstrapCards]);
 
-  // Poll groups so create/delete by other users (or other tabs) shows up without restart
-  useEffect(() => {
-    if (!user) return;
-    const interval = setInterval(() => {
-      loadGroups();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [user, loadGroups]);
-
   const acceptInvite = (inviteId: number) => {
     setPendingInvites(prev => prev.filter(inv => inv.id !== inviteId));
     loadGroups();
@@ -298,6 +290,12 @@ export default function App() {
         ) : !isAuthenticated ? (
           <LoginSignup onAuthenticate={handlePostAuth} onForgotPassword={() => setShowForgotPassword(true)} />
         ) : (
+          <SocketProvider
+            enabled={!!user}
+            onGroupsChanged={loadGroups}
+            onGroupUpdated={(groupId) => invalidateGroupCache(groupId)}
+            onActivityChanged={() => {}}
+          >
           <AnimatePresence mode="wait">
             <motion.div
               key={currentPage}
@@ -350,6 +348,7 @@ export default function App() {
               {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
             </motion.div>
           </AnimatePresence>
+          </SocketProvider>
         )}
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-black rounded-full opacity-40" />
       </div>

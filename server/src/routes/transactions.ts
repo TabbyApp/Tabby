@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { emitToGroup } from '../socket.js';
 import { extractReceiptItems } from '../ocr.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -413,6 +414,7 @@ transactionsRouter.post('/:id/finalize', requireAuth, async (req, res) => {
     amount: a.amount,
     name: nameMap.get(a.user_id) ?? 'Unknown',
   }));
+  void emitToGroup(tx.group_id, 'group:updated', { groupId: tx.group_id });
   res.json({ ok: true, allocations: withNames, status: 'SETTLED' });
 });
 
@@ -446,6 +448,10 @@ export async function runFallbackForTransaction(id: string): Promise<boolean> {
       await query('INSERT INTO transaction_allocations (id, transaction_id, user_id, amount) VALUES ($1, $2, $3, $4)', [genId(), id, a.user_id, a.amount]);
     }
   }
+  if (tx.group_id) {
+    void emitToGroup(tx.group_id, 'group:updated', { groupId: tx.group_id });
+    void emitToGroup(tx.group_id, 'activity:changed', { groupId: tx.group_id });
+  }
   return true;
 }
 
@@ -473,6 +479,8 @@ transactionsRouter.post('/:id/settle', requireAuth, async (req, res) => {
   await query('UPDATE transactions SET status = $1, settled_at = $2, archived_at = $3 WHERE id = $4', ['SETTLED', now, now, id]);
   await query('UPDATE groups SET last_settled_at = $1 WHERE id = $2', [now, tx.group_id]);
 
+  void emitToGroup(tx.group_id, 'group:updated', { groupId: tx.group_id });
+  void emitToGroup(tx.group_id, 'activity:changed', { groupId: tx.group_id });
   const { rows: allocs } = await query<{ user_id: string; amount: number; name: string }>(`
     SELECT ta.user_id, ta.amount, u.name
     FROM transaction_allocations ta

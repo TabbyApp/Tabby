@@ -8,6 +8,7 @@ import convert from 'heic-convert';
 import extractd from 'extractd';
 import { query } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { emitToGroup } from '../socket.js';
 import { processReceipt } from '../receiptProcessor.js';
 import { validateReceipt } from '../receiptValidation.js';
 import type { ParsedReceipt } from '../ocr/types.js';
@@ -109,6 +110,7 @@ receiptsRouter.post('/', requireAuth, async (req, res) => {
   );
   const { rows } = await query('SELECT * FROM receipts WHERE id = $1', [id]);
   res.status(201).json(rows[0]);
+  void emitToGroup(groupId, 'group:updated', { groupId });
 });
 
 receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, res) => {
@@ -191,6 +193,7 @@ receiptsRouter.post('/upload', requireAuth, upload.single('file'), async (req, r
 
     const validation = validateReceipt(parsed);
     console.log('[Receipt] upload validation:', validation.isValid ? 'OK' : 'FAIL', validation.issues?.length ? validation.issues : '');
+    void emitToGroup(groupId, 'group:updated', { groupId });
     const { rows } = await query('SELECT * FROM receipts WHERE id = $1', [id]);
     const receipt = rows[0] as Record<string, unknown>;
     res.status(201).json({
@@ -399,6 +402,7 @@ receiptsRouter.post('/:receiptId/confirm', requireAuth, async (req, res) => {
     }
 
     res.json({ ok: true, receipt: { id: receiptId, status: 'DONE', final_snapshot: body } });
+    void emitToGroup(receipt.group_id, 'group:updated', { groupId: receipt.group_id });
   } catch (err) {
     console.error('[Receipt] confirm error:', err);
     res.status(500).json({ error: err instanceof Error ? err.message : 'Confirm failed' });
@@ -464,6 +468,7 @@ receiptsRouter.post('/:receiptId/retry', requireAuth, async (req, res) => {
       );
     }
 
+    void emitToGroup(receipt.group_id, 'group:updated', { groupId: receipt.group_id });
     const { rows: updatedRows } = await query('SELECT * FROM receipts WHERE id = $1', [receiptId]);
     const updated = updatedRows[0] as Record<string, unknown>;
     res.json({
@@ -506,6 +511,7 @@ receiptsRouter.post('/:receiptId/items', requireAuth, async (req, res) => {
 
   const { rows: itemRows } = await query('SELECT id, name, price, sort_order FROM receipt_items WHERE id = $1', [id]);
   res.status(201).json(itemRows[0]);
+  void emitToGroup(receipt.group_id, 'group:updated', { groupId: receipt.group_id });
 });
 
 receiptsRouter.put('/:receiptId/items/:itemId/claims', requireAuth, async (req, res) => {
@@ -597,5 +603,7 @@ receiptsRouter.post('/:receiptId/complete', requireAuth, async (req, res) => {
     JOIN users u ON rs.user_id = u.id
     WHERE rs.receipt_id = $1
   `, [receiptId]);
+  void emitToGroup(receipt.group_id, 'group:updated', { groupId: receipt.group_id });
+  void emitToGroup(receipt.group_id, 'activity:changed', { groupId: receipt.group_id });
   res.json({ ok: true, splits });
 });
