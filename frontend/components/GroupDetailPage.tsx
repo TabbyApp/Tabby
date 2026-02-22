@@ -157,13 +157,18 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const [cardLastFour, setCardLastFour] = useState<string | null>(null);
   const [receiptDetail, setReceiptDetail] = useState<{ items: { id: string; name: string; price: number }[]; claims: Record<string, string[]>; members: { id: string; name: string }[] } | null>(null);
 
-  // Receipt is "pending for item split" when uploaded and not yet completed (backend uses NEEDS_REVIEW after upload, not 'pending')
-  const PENDING_ITEM_SPLIT_STATUSES = ['pending', 'NEEDS_REVIEW', 'UPLOADED'];
-  const latestPendingReceipt = realReceipts.find((r: any) => PENDING_ITEM_SPLIT_STATUSES.includes(r.status));
+  // Host hasn't confirmed yet: only these statuses. Members must wait before selecting items.
+  const HOST_PENDING_STATUSES = ['pending', 'NEEDS_REVIEW', 'UPLOADED'];
+  const latestPendingReceipt = realReceipts.find((r: any) => HOST_PENDING_STATUSES.includes(r.status));
   const hasPendingReceipt = !!latestPendingReceipt;
-  // After item-split confirm, receipt becomes 'completed' so use latest completed receipt without transaction for Edit
-  const latestCompletedReceiptNoTx = realReceipts.find((r: any) => r.status === 'completed' && !r.transaction_id);
-  const receiptForItemSplit = latestPendingReceipt ?? latestCompletedReceiptNoTx;
+  // Receipt in item-split phase: either host still reviewing (NEEDS_REVIEW/UPLOADED) or host confirmed (DONE) or completed with no transaction yet
+  const ITEM_SPLIT_READY_STATUSES = ['pending', 'NEEDS_REVIEW', 'UPLOADED', 'DONE'];
+  const receiptForItemSplit = realReceipts.find(
+    (r: any) => ITEM_SPLIT_READY_STATUSES.includes(r.status) || (r.status === 'completed' && !r.transaction_id)
+  );
+  const hasReceiptForItemSplit = !!receiptForItemSplit;
+  // Members may only select items after host has confirmed (DONE or completed); before that they see "waiting for host"
+  const receiptReadyForMemberSelection = receiptForItemSplit && ['DONE', 'completed'].includes(receiptForItemSplit.status);
 
   // Track which groupId we've loaded for, to avoid double-fetching
   const loadedGroupRef = useRef<string | null>(null);
@@ -268,6 +273,16 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setReceiptTotal(latest.total);
         setHasReceipt(true);
       }
+      // Refetch receipt detail (items + claims) for the current item-split receipt so member selections update in real time via WebSocket
+      const itemSplitStatuses = ['pending', 'NEEDS_REVIEW', 'UPLOADED', 'DONE'];
+      const forSplit = receipts.find((r: any) => itemSplitStatuses.includes(r.status) || (r.status === 'completed' && !r.transaction_id));
+      if (forSplit?.id) {
+        api.receipts.get(forSplit.id).then((data: any) => {
+          setReceiptDetail({ items: data.items ?? [], claims: data.claims ?? {}, members: data.members ?? [] });
+        }).catch(() => setReceiptDetail(null));
+      } else {
+        setReceiptDetail(null);
+      }
       if (groupData) {
         const g = groupData as { lastSettledAt?: string | null; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]>; supportCode?: string | null; cardLastFour?: string | null; splitModePreference?: string };
         setCachedGroupDetail(groupId, {
@@ -299,24 +314,24 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   }, [groupId, lastSettledAt, lastSettledAllocations.length, lastSettledBreakdown]);
 
   const refetchReceiptDetail = useCallback(() => {
-    if (!latestPendingReceipt?.id) return;
-    api.receipts.get(latestPendingReceipt.id).then((data: any) => {
+    if (!receiptForItemSplit?.id) return;
+    api.receipts.get(receiptForItemSplit.id).then((data: any) => {
       setReceiptDetail({ items: data.items ?? [], claims: data.claims ?? {}, members: data.members ?? [] });
     }).catch(() => setReceiptDetail(null));
-  }, [latestPendingReceipt?.id]);
+  }, [receiptForItemSplit?.id]);
 
-  useReceiptClaimsRealtime(latestPendingReceipt?.id ?? null, refetchReceiptDetail);
+  useReceiptClaimsRealtime(receiptForItemSplit?.id ?? null, refetchReceiptDetail);
 
-  // Fetch receipt detail (items + claims) for pending receipt to show member selections
+  // Fetch receipt detail (items + claims) for item-split receipt to show member selections
   useEffect(() => {
-    if (!latestPendingReceipt?.id || !groupId) {
+    if (!receiptForItemSplit?.id || !groupId) {
       setReceiptDetail(null);
       return;
     }
-    api.receipts.get(latestPendingReceipt.id).then((data: any) => {
+    api.receipts.get(receiptForItemSplit.id).then((data: any) => {
       setReceiptDetail({ items: data.items ?? [], claims: data.claims ?? {}, members: data.members ?? [] });
     }).catch(() => setReceiptDetail(null));
-  }, [latestPendingReceipt?.id, groupId]);
+  }, [receiptForItemSplit?.id, groupId]);
 
   const isCreator = realCreatedBy ? realCreatedBy === user?.id : currentGroup?.createdBy === currentUserId;
   // When pending receipt exists, non-hosts are locked to item split; host can always choose
@@ -1095,28 +1110,42 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     </p>
                   )}
                 </>
-              ) : hasPendingReceipt ? (
+              ) : hasReceiptForItemSplit ? (
                 <motion.div
                   initial={{ y: 8, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ duration: 0.15 }}
                   className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
                 >
-                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
-                    <Receipt size={28} className="text-indigo-600" />
-                  </div>
-                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Select Your Items</h3>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
-                    A receipt has been uploaded. Choose what you ordered to split by item.
-                  </p>
-                  <button
-                    onClick={() => groupId && latestPendingReceipt && onNavigateToReceiptItems?.(groupId, latestPendingReceipt.id)}
-                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
-                  >
-                    Select Your Items
-                  </button>
-                  {receiptDetail && receiptDetail.items.length > 0 && (
-                    <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} isDark={isDark} />
+                  {!receiptReadyForMemberSelection && !isCreator ? (
+                    <>
+                      <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-amber-100'} flex items-center justify-center mx-auto mb-4`}>
+                        <Receipt size={28} className="text-amber-600" />
+                      </div>
+                      <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Waiting for host to confirm receipt</h3>
+                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                        The host is reviewing the receipt. You can select your items once they confirm.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
+                        <Receipt size={28} className="text-indigo-600" />
+                      </div>
+                      <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Select Your Items</h3>
+                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                        A receipt has been uploaded. Choose what you ordered to split by item.
+                      </p>
+                      <button
+                        onClick={() => groupId && receiptForItemSplit && onNavigateToReceiptItems?.(groupId, receiptForItemSplit.id)}
+                        className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                      >
+                        Select Your Items
+                      </button>
+                      {receiptDetail && receiptDetail.items.length > 0 && (
+                        <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} isDark={isDark} />
+                      )}
+                    </>
                   )}
                 </motion.div>
               ) : (
