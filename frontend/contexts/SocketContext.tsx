@@ -20,6 +20,8 @@ type SocketProviderProps = {
   onGroupsChanged?: () => void;
   onGroupUpdated?: (groupId: string) => void;
   onActivityChanged?: () => void;
+  onRemovedFromGroup?: (groupId: string) => void;
+  onGroupDeleted?: (groupId: string) => void;
 };
 
 export function SocketProvider({
@@ -28,14 +30,16 @@ export function SocketProvider({
   onGroupsChanged,
   onGroupUpdated,
   onActivityChanged,
+  onRemovedFromGroup,
+  onGroupDeleted,
 }: SocketProviderProps) {
   const [lastGroupUpdatedId, setLastGroupUpdatedId] = useState<string | null>(null);
   const [lastGroupUpdatedAt, setLastGroupUpdatedAt] = useState(0);
   const [groupsChangedAt, setGroupsChangedAt] = useState(0);
   const [activityInvalidatedAt, setActivityInvalidatedAt] = useState(0);
   const socketRef = useRef<Socket | null>(null);
-  const callbacksRef = useRef({ onGroupsChanged, onGroupUpdated, onActivityChanged });
-  callbacksRef.current = { onGroupsChanged, onGroupUpdated, onActivityChanged };
+  const callbacksRef = useRef({ onGroupsChanged, onGroupUpdated, onActivityChanged, onRemovedFromGroup, onGroupDeleted });
+  callbacksRef.current = { onGroupsChanged, onGroupUpdated, onActivityChanged, onRemovedFromGroup, onGroupDeleted };
 
   useEffect(() => {
     if (!enabled) return;
@@ -69,6 +73,14 @@ export function SocketProvider({
     socket.on('activity:changed', () => {
       setActivityInvalidatedAt((t) => Date.now());
       callbacksRef.current.onActivityChanged?.();
+    });
+
+    socket.on('removed-from-group', (payload: { groupId?: string }) => {
+      if (payload?.groupId) callbacksRef.current.onRemovedFromGroup?.(payload.groupId);
+    });
+
+    socket.on('group-deleted', (payload: { groupId?: string }) => {
+      if (payload?.groupId) callbacksRef.current.onGroupDeleted?.(payload.groupId);
     });
 
     return () => {
