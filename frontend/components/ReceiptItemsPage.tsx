@@ -122,9 +122,14 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     if (!receiptId || !groupId || lastGroupUpdatedId !== groupId || lastGroupUpdatedAt === 0) return;
     api.receipts.get(receiptId).then((r) => {
       applyReceiptData(r);
-      if (r.status === 'completed') refetchReceipt();
+      if (r.status === 'completed') {
+        refetchReceipt();
+        // Reroute members to group detail so they see the same "add tip" view as the host (read-only tip, their total)
+        onSelectionConfirmed?.(groupId);
+        onNavigate('groupDetail', groupId);
+      }
     }).catch(() => {});
-  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, receiptId, applyReceiptData, refetchReceipt]);
+  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, receiptId, applyReceiptData, refetchReceipt, onNavigate]);
 
   const reviewValidation = useMemo(
     () => (reviewReceipt ? validateReceipt(reviewReceipt) : null),
@@ -154,6 +159,12 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
 
   const toggleItemSelection = (itemId: number) => {
     if (!isSelectedMemberMe) return;
+  // Only host can interact while receipt is in NEEDS_REVIEW/UPLOADED; after host confirms (DONE), everyone can select items
+  const canSelectItems = user?.id === uploadedBy || !['NEEDS_REVIEW', 'UPLOADED'].includes(receiptStatus);
+  const waitingForHostConfirm = !canSelectItems && uploadedBy && user?.id !== uploadedBy;
+
+  const toggleItemSelection = (itemId: number) => {
+    if (!canSelectItems) return;
     setItems(prevItems => prevItems.map(item => {
       if (item.id === itemId) {
         const alreadySelected = item.selectedBy.includes(selectedMember);
@@ -512,6 +523,13 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
           </div>
         </div>
 
+        {waitingForHostConfirm && (
+          <div className={`mb-4 rounded-xl p-4 ${isDark ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
+            <p className={`text-sm font-medium ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>
+              Waiting for host to confirm receipt. You can select your items once they confirm.
+            </p>
+          </div>
+        )}
         {receiptStatus === 'FAILED' && realReceiptId && (
           <div className={`mb-4 rounded-xl p-4 flex items-center justify-between ${isDark ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
             <p className={`text-sm font-medium ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>Processing failed. You can retry or add items manually.</p>
@@ -581,12 +599,12 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
               animate={{ x: 0, opacity: 1 }}
               transition={{ delay: index * 0.05, duration: 0.3 }}
               onClick={() => toggleItemSelection(item.id)}
-              disabled={!isSelectedMemberMe}
+              disabled={!canSelectItems}
               className={`w-full ${
                 isDark ? 'bg-slate-800' : 'bg-white'
               } rounded-xl p-4 shadow-sm transition-all ${
-                isSelected ? 'ring-2 ring-blue-500' : ''
-              } ${!isSelectedMemberMe ? 'opacity-75 cursor-default' : 'active:scale-[0.98]'}`}
+                canSelectItems ? 'active:scale-[0.98]' : 'opacity-70 cursor-not-allowed'
+              } ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
             >
               <div className="flex items-start gap-3">
                 <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${

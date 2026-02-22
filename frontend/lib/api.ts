@@ -1,4 +1,12 @@
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
+/** API base: same-origin /api, or VITE_API_URL (normalized to end with /api so /auth/login → /api/auth/login). */
+function getApiBase(): string {
+  const raw = import.meta.env.VITE_API_URL;
+  if (!raw || typeof raw !== 'string') return '/api';
+  const base = raw.replace(/\/+$/, '');
+  if (!base.startsWith('http://') && !base.startsWith('https://')) return '/api';
+  return base.endsWith('/api') ? base : `${base}/api`;
+}
+const API_BASE = getApiBase();
 const TOKEN_KEY = 'tabby_access_token';
 
 /** Resolve server asset URL (e.g. /uploads/avatars/xxx) to full URL for img src */
@@ -192,7 +200,7 @@ export const api = {
         body: JSON.stringify({ name, memberEmails }),
       }),
     get: (groupId: string) =>
-      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; avatarUrl?: string }[]; cardLastFour: string | null; inviteToken: string | null; supportCode: string | null; lastSettledAt: string | null; splitModePreference?: string }>(
+      request<{ id: string; name: string; created_by: string; members: { id: string; name: string; email: string; avatarUrl?: string }[]; cardLastFour: string | null; inviteToken: string | null; supportCode: string | null; lastSettledAt: string | null; splitModePreference?: string; pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number }; lastSettledAllocations?: { user_id: string; name: string; amount: number }[]; lastSettledBreakdown?: Record<string, { subtotal: number; tax: number; tip: number }>; lastSettledItemsPerUser?: Record<string, { name: string; price: number }[]> }>(
         `/groups/${groupId}`
       ),
     /** Batch fetch group details - 1 request instead of N (avoids connection queueing) */
@@ -218,6 +226,8 @@ export const api = {
       request<{ ok: boolean }>(`/groups/${groupId}/members/${memberId}`, { method: 'DELETE' }),
     updateSplitModePreference: (groupId: string, splitModePreference: 'even' | 'item') =>
       request<{ ok: boolean }>(`/groups/${groupId}`, { method: 'PUT', body: JSON.stringify({ splitModePreference }) }),
+    updateDraftTip: (groupId: string, draftTipPercentage: number) =>
+      request<{ ok: boolean }>(`/groups/${groupId}`, { method: 'PATCH', body: JSON.stringify({ draftTipPercentage }) }),
     virtualCards: () =>
       request<{ groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[]>(
         '/groups/virtual-cards/list'
