@@ -299,24 +299,42 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   }, [groupId, lastSettledAt, lastSettledAllocations.length, lastSettledBreakdown]);
 
   const refetchReceiptDetail = useCallback(() => {
-    if (!latestPendingReceipt?.id) return;
-    api.receipts.get(latestPendingReceipt.id).then((data: any) => {
+    if (!receiptForItemSplit?.id) return;
+    api.receipts.get(receiptForItemSplit.id).then((data: any) => {
       setReceiptDetail({ items: data.items ?? [], claims: data.claims ?? {}, members: data.members ?? [] });
     }).catch(() => setReceiptDetail(null));
-  }, [latestPendingReceipt?.id]);
+  }, [receiptForItemSplit?.id]);
 
-  useReceiptClaimsRealtime(latestPendingReceipt?.id ?? null, refetchReceiptDetail);
+  useReceiptClaimsRealtime(receiptForItemSplit?.id ?? null, refetchReceiptDetail);
 
-  // Fetch receipt detail (items + claims) for pending receipt to show member selections
+  // Fetch receipt detail (items + claims) for pending or completed receipt to show member selections / tip block
   useEffect(() => {
-    if (!latestPendingReceipt?.id || !groupId) {
+    if (!receiptForItemSplit?.id || !groupId) {
       setReceiptDetail(null);
       return;
     }
-    api.receipts.get(latestPendingReceipt.id).then((data: any) => {
+    api.receipts.get(receiptForItemSplit.id).then((data: any) => {
       setReceiptDetail({ items: data.items ?? [], claims: data.claims ?? {}, members: data.members ?? [] });
     }).catch(() => setReceiptDetail(null));
-  }, [latestPendingReceipt?.id, groupId]);
+  }, [receiptForItemSplit?.id, groupId]);
+
+  // When we have a completed receipt (no tx yet), sync itemSplitData so members see correct yourItemsTotal and full subtotal (tax correct)
+  useEffect(() => {
+    if (!receiptDetail?.items?.length || !receiptForItemSplit || receiptForItemSplit.status !== 'completed' || receiptForItemSplit.transaction_id || !user?.id) return;
+    const fullSubtotal = receiptDetail.items.reduce((s, i) => s + i.price, 0);
+    let myAmount = 0;
+    for (const item of receiptDetail.items) {
+      const userIds = receiptDetail.claims[item.id] ?? [];
+      if (userIds.includes(user.id)) myAmount += item.price / userIds.length;
+    }
+    const receiptTotalVal = receiptForItemSplit.total != null && receiptForItemSplit.total >= fullSubtotal ? receiptForItemSplit.total : fullSubtotal;
+    setItemSplitData({
+      hasSelectedItems: true,
+      yourItemsTotal: myAmount,
+      receiptTotal: receiptTotalVal,
+      subtotal: fullSubtotal,
+    });
+  }, [receiptDetail, receiptForItemSplit, user?.id, setItemSplitData]);
 
   const isCreator = realCreatedBy ? realCreatedBy === user?.id : currentGroup?.createdBy === currentUserId;
   // When pending receipt exists, non-hosts are locked to item split; host can always choose
