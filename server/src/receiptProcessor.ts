@@ -16,10 +16,11 @@ function parseRawToStructured(raw: RawOcrOutput): ParsedReceipt {
     for (const line of raw.lineItems) {
       const name = (line.descClean ?? line.desc ?? '').trim();
       const price = line.lineTotal ?? line.price ?? 0;
-      if (!name || typeof price !== 'number' || Number.isNaN(price) || price <= 0 || price > 99999) continue;
+      // Allow price 0 so free items (e.g. salad, sauce options) show as $0.00 and aren't charged
+      if (!name || typeof price !== 'number' || Number.isNaN(price) || price < 0 || price > 99999) continue;
       if (name.length > 120) continue;
       const qty = line.qty != null && line.qty >= 1 ? line.qty : undefined;
-      const unitPrice = qty != null && qty > 0 ? Math.round((price / qty) * 100) / 100 : undefined;
+      const unitPrice = qty != null && qty > 0 && price > 0 ? Math.round((price / qty) * 100) / 100 : undefined;
       lineItems.push({ name, price, qty, unitPrice });
     }
   }
