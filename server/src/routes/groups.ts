@@ -10,6 +10,11 @@ function genId() {
   return crypto.randomUUID();
 }
 
+/** Express req.params can be string | string[]; normalize to string for route params. */
+function param(p: string | string[] | undefined): string {
+  return Array.isArray(p) ? p[0] ?? '' : p ?? '';
+}
+
 function addMinutes(date: Date, mins: number): string {
   return new Date(date.getTime() + mins * 60 * 1000).toISOString();
 }
@@ -460,7 +465,7 @@ groupsRouter.post('/join/:token', requireAuth, requireBankLinked, async (req, re
 // Delete group (host only)
 groupsRouter.delete('/:groupId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
-  const { groupId } = req.params;
+  const groupId = param(req.params.groupId);
 
   const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
   const group = groupRows[0];
@@ -495,7 +500,7 @@ groupsRouter.delete('/:groupId', requireAuth, async (req, res) => {
 // Leave group (non-host members only)
 groupsRouter.post('/:groupId/leave', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
-  const { groupId } = req.params;
+  const groupId = param(req.params.groupId);
 
   const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
   const group = groupRows[0];
@@ -515,7 +520,8 @@ groupsRouter.post('/:groupId/leave', requireAuth, async (req, res) => {
 // Remove member from group (host only)
 groupsRouter.delete('/:groupId/members/:memberId', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
-  const { groupId, memberId } = req.params;
+  const groupId = param(req.params.groupId);
+  const memberId = param(req.params.memberId);
 
   const { rows: groupRows } = await query<{ created_by: string }>('SELECT created_by FROM groups WHERE id = $1', [groupId]);
   const group = groupRows[0];
@@ -536,7 +542,7 @@ groupsRouter.delete('/:groupId/members/:memberId', requireAuth, async (req, res)
 // Create transaction (on receipt upload or manual total entry). For FULL_CONTROL, optional receiptId links existing completed receipt.
 groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, async (req, res) => {
   const { userId } = (req as any).user;
-  const { groupId } = req.params;
+  const groupId = param(req.params.groupId);
   const { splitMode, receiptId: bodyReceiptId } = req.body;
 
   if (!['EVEN_SPLIT', 'FULL_CONTROL'].includes(splitMode)) {

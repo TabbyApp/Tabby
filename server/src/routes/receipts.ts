@@ -511,7 +511,8 @@ receiptsRouter.post('/:receiptId/items', requireAuth, async (req, res) => {
 
   const { rows: itemRows } = await query('SELECT id, name, price, sort_order FROM receipt_items WHERE id = $1', [id]);
   res.status(201).json(itemRows[0]);
-  void emitToGroup(receipt.group_id, 'group:updated', { groupId: receipt.group_id });
+  const groupId = (receipt as { group_id: string }).group_id;
+  void emitToGroup(groupId, 'group:updated', { groupId });
 });
 
 receiptsRouter.put('/:receiptId/items/:itemId/claims', requireAuth, async (req, res) => {
