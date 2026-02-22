@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:insecure": "NODE_TLS_REJECT_UNAUTHORIZED=0 tsx watch src/index.ts",
     "build": "tsc",
     "start": "node scripts/migrate.mjs && node dist/index.js",
     "seed": "tsx src/seed.ts",

@@ -267,9 +267,10 @@ transactionsRouter.put('/:id/items/:itemId/claims', requireAuth, async (req, res
     );
     validIds.push(...rows.map((r) => r.user_id));
   }
+  const receiptId = receipt.id;
   await query('DELETE FROM item_claims WHERE receipt_item_id = $1', [itemId]);
   for (const uid of validIds) {
-    await query('INSERT INTO item_claims (receipt_item_id, user_id) VALUES ($1, $2) ON CONFLICT (receipt_item_id, user_id) DO NOTHING', [itemId, uid]);
+    await query('INSERT INTO item_claims (receipt_item_id, user_id, receipt_id) VALUES ($1, $2, $3) ON CONFLICT (receipt_item_id, user_id) DO NOTHING', [itemId, uid, receiptId]);
   }
   const { rows: claimRows } = await query<{ user_id: string }>('SELECT user_id FROM item_claims WHERE receipt_item_id = $1', [itemId]);
   res.json({ userIds: claimRows.map((c) => c.user_id) });
