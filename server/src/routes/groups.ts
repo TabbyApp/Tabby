@@ -473,6 +473,7 @@ groupsRouter.delete('/:groupId', requireAuth, async (req, res) => {
   if (group.created_by !== userId) return res.status(403).json({ error: 'Only the host can delete this group' });
 
   const memberIds = await getGroupMemberIds(groupId);
+  emitToUsers(memberIds, 'group-deleted', { groupId });
 
   await withTransaction(async (client) => {
     const { rows: receiptRows } = await client.query<{ id: string }>('SELECT id FROM receipts WHERE group_id = $1', [groupId]);
@@ -533,6 +534,7 @@ groupsRouter.delete('/:groupId/members/:memberId', requireAuth, async (req, res)
   if (memberRows.length === 0) return res.status(404).json({ error: 'Member not found in this group' });
 
   const memberIds = await getGroupMemberIds(groupId);
+  emitToUsers([memberId], 'removed-from-group', { groupId });
   await query('DELETE FROM group_members WHERE group_id = $1 AND user_id = $2', [groupId, memberId]);
   res.json({ ok: true });
   emitToUsers(memberIds, 'groups:changed', {});

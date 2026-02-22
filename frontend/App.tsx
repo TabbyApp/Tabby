@@ -97,6 +97,7 @@ export default function App() {
     id: number; groupName: string; inviterName: string; members: number;
   }>>([]);
   const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
+  const [groupKickedReason, setGroupKickedReason] = useState<'removed' | 'deleted' | null>(null);
 
   const unreadNotificationCount = notifications.filter(n => !n.read).length;
 
@@ -214,6 +215,22 @@ export default function App() {
   };
 
   const theme = themePreference === 'system' ? 'light' : themePreference;
+  const isDark = theme === 'dark';
+
+  const handleRemovedFromGroup = useCallback((groupId: string) => {
+    loadGroups();
+    setCurrentPage('home');
+    setSelectedGroupId(null);
+    setGroupKickedReason('removed');
+  }, [loadGroups]);
+
+  const handleGroupDeleted = useCallback((groupId: string) => {
+    loadGroups();
+    setCurrentPage('home');
+    setSelectedGroupId(null);
+    invalidateGroupCache(groupId);
+    setGroupKickedReason('deleted');
+  }, [loadGroups]);
 
   const handleNavigate = (page: PageType, groupId?: string) => {
     setPageHistory(prev => [...prev, currentPage]);
@@ -295,6 +312,8 @@ export default function App() {
             onGroupsChanged={loadGroups}
             onGroupUpdated={(groupId) => invalidateGroupCache(groupId)}
             onActivityChanged={() => {}}
+            onRemovedFromGroup={handleRemovedFromGroup}
+            onGroupDeleted={handleGroupDeleted}
           >
           <AnimatePresence mode="wait">
             <motion.div
@@ -349,6 +368,31 @@ export default function App() {
             </motion.div>
           </AnimatePresence>
           </SocketProvider>
+        )}
+        {/* Modal: removed from group / group deleted */}
+        {isAuthenticated && groupKickedReason && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 max-w-sm w-full shadow-xl`}
+            >
+              <p className={`text-center text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {groupKickedReason === 'removed'
+                  ? "You've been removed from the group."
+                  : 'This group was deleted.'}
+              </p>
+              <p className={`text-center text-sm mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                You've been taken back to home.
+              </p>
+              <button
+                onClick={() => setGroupKickedReason(null)}
+                className={`w-full mt-6 py-3 rounded-xl font-semibold ${isDark ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white'}`}
+              >
+                OK
+              </button>
+            </motion.div>
+          </div>
         )}
         <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-black rounded-full opacity-40" />
       </div>
