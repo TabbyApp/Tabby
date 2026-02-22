@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import 'express-async-errors';
+import { createServer } from 'http';
 import express from 'express';
 import cors from 'cors';
+import { initSocket } from './socket.js';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -115,8 +117,11 @@ async function start() {
     process.exit(1);
   }
 
-  app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  const httpServer = createServer(app);
+  initSocket(httpServer);
+
+  httpServer.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT} (HTTP + WebSocket)`);
 
     // Timer: every 30s check for expired PENDING_ALLOCATION transactions
   setInterval(async () => {
