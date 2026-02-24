@@ -1,5 +1,9 @@
 /** API base: same-origin /api, or VITE_API_URL (normalized to end with /api so /auth/login → /api/auth/login). */
 function getApiBase(): string {
+  // For local development, always use /api proxy
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return '/api';
+  }
   const raw = import.meta.env.VITE_API_URL;
   if (!raw || typeof raw !== 'string') return '/api';
   const base = raw.replace(/\/+$/, '');
