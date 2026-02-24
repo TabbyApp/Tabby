@@ -33,9 +33,19 @@ npm run dev
 
 Or start it in one command: `VITE_API_URL= npm run dev`
 
-### OCR provider
+### Critical: RECEIPT_OCR_PROVIDER in cloud environments
 
-For local development without external API keys, set `RECEIPT_OCR_PROVIDER=mock` in `server/.env`. This returns deterministic sample data for receipt uploads. See `server/.env.example` for all OCR provider options.
+The Cursor Cloud VM also injects `RECEIPT_OCR_PROVIDER=mindee` which overrides the `server/.env` setting. The Mindee API key injected may not be valid, causing empty OCR results. When starting the backend, **explicitly override it**:
+
+```bash
+RECEIPT_OCR_PROVIDER=mock npm run dev
+```
+
+The mock provider returns deterministic sample data (4 coffee shop items totaling $27.22). See `server/.env.example` for all OCR provider options.
+
+### Bank linking
+
+The app uses a stub endpoint (`POST /api/users/link-bank`) that works without Plaid API keys. The Plaid routes (`/api/plaid/*`) exist but are not integrated into the frontend. Call the stub endpoint to enable group creation and payment flows.
 
 ### Lint / Build / Test
 
