@@ -1365,7 +1365,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
               <div className="w-12 h-1.5 bg-muted-foreground/40 rounded-full mx-auto mb-6" />
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 rounded-[14px] bg-primary/20 flex items-center justify-center">
-                  <Link2 size={24} className="text-white" />
+                  <Link2 size={24} className="text-primary" />
                 </div>
                 <div>
                   <h3 className={`text-lg font-bold text-foreground`}>Invite Members</h3>

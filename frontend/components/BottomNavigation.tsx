@@ -11,7 +11,7 @@ interface BottomNavigationProps {
 export function BottomNavigation({ currentPage, onNavigate, onProfileClick, theme }: BottomNavigationProps) {
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-xl border-t border-border z-20">
-      <div className="mx-auto max-w-[430px] px-6 pt-2 pb-6 safe-area-inset-bottom">
+      <div className="mx-auto max-w-[430px] px-6 pt-2 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
         <div className="flex items-center justify-around">
           <button
             onClick={() => onNavigate('home')}
