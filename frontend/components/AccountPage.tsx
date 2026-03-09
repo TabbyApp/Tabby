@@ -13,7 +13,6 @@ interface AccountPageProps {
 }
 
 export function AccountPage({ onNavigate, theme }: AccountPageProps) {
-  const isDark = theme === 'dark';
   const { user, setUser, refreshBootstrap } = useAuth();
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingPhone, setIsEditingPhone] = useState(false);
@@ -85,26 +84,24 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
   };
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
-      {/* Header */}
-      <motion.div 
+    <div className="min-h-screen flex flex-col bg-background">
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}
+        className="bg-card border-b border-border px-5 py-4"
       >
         <div className="flex items-center gap-3">
-          <button 
+          <button
             onClick={() => onNavigate('home')}
-            className={`w-9 h-9 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center active:scale-95 transition-transform`}
+            className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center active:scale-95 transition-transform"
           >
-            <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-slate-800'} strokeWidth={2.5} />
+            <ChevronLeft size={20} className="text-foreground" strokeWidth={2.5} />
           </button>
-          <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Account</h1>
+          <h1 className="text-2xl font-bold text-foreground">Account</h1>
         </div>
       </motion.div>
 
-      {/* Profile Picture */}
-      <div className="flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="flex-1 overflow-y-auto px-5 py-6 pb-24">
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -113,110 +110,105 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
         >
           <label className="relative cursor-pointer">
             <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} disabled={uploadingAvatar} />
-            <div className="w-24 h-24 rounded-full overflow-hidden bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center text-white shadow-xl mb-4 ring-2 ring-white/20">
+            <div className="w-24 h-24 rounded-full overflow-hidden bg-primary flex items-center justify-center text-primary-foreground shadow-xl mb-4 ring-2 ring-border">
               {avatarUrl ? (
                 <img src={assetUrl(avatarUrl)} alt="Profile" className="w-full h-full object-cover" />
               ) : (
                 <User size={40} strokeWidth={2.5} />
               )}
             </div>
-            <span className="text-violet-600 font-medium text-sm active:scale-95 transition-transform block text-center">
+            <span className="text-primary font-medium text-sm active:scale-95 transition-transform block text-center">
               {uploadingAvatar ? 'Uploading...' : 'Change Photo'}
             </span>
           </label>
         </motion.div>
 
-        {/* Personal Information */}
         <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }}>
-          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>Personal Information</h2>
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Personal Information</h2>
           <div className="space-y-3">
-            {/* Name */}
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
+            <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-violet-100'} flex items-center justify-center`}>
-                  <User size={20} className="text-violet-600" />
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <User size={20} className="text-primary" />
                 </div>
                 <div className="flex-1">
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-1`}>Full Name</p>
+                  <p className="text-xs text-muted-foreground mb-1">Full Name</p>
                   {isEditingName ? (
                     <input type="text" value={tempName} onChange={(e) => setTempName(e.target.value)}
-                      className={`font-semibold ${isDark ? 'text-white bg-slate-700' : 'text-slate-800 bg-slate-50'} px-2 py-1 rounded w-full`} autoFocus
+                      className="font-semibold text-foreground bg-input-background border border-border px-2 py-1 rounded w-full" autoFocus
                     />
                   ) : (
-                    <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{name}</p>
+                    <p className="font-semibold text-foreground">{name}</p>
                   )}
                 </div>
                 {isEditingName ? (
-                  <button onClick={handleSaveName} className="text-violet-600"><Check size={20} /></button>
+                  <button onClick={handleSaveName} className="text-primary"><Check size={20} /></button>
                 ) : (
-                  <button onClick={() => { setIsEditingName(true); setTempName(name); }} className="text-violet-600"><Edit2 size={18} /></button>
+                  <button onClick={() => { setIsEditingName(true); setTempName(name); }} className="text-primary"><Edit2 size={18} /></button>
                 )}
               </div>
             </div>
 
-            {/* Email */}
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
+            <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-purple-100'} flex items-center justify-center`}>
-                  <Mail size={20} className="text-purple-600" />
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Mail size={20} className="text-primary" />
                 </div>
                 <div className="flex-1">
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-1`}>Email</p>
-                  <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{user?.email ?? 'No email'}</p>
+                  <p className="text-xs text-muted-foreground mb-1">Email</p>
+                  <p className="font-semibold text-foreground">{user?.email ?? 'No email'}</p>
                 </div>
               </div>
             </div>
 
-            {/* Phone */}
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
+            <div className="bg-card border border-border rounded-xl p-4">
               <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-green-100'} flex items-center justify-center`}>
-                  <Phone size={20} className="text-green-600" />
+                <div className="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center">
+                  <Phone size={20} className="text-success" />
                 </div>
                 <div className="flex-1">
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-1`}>Phone Number</p>
+                  <p className="text-xs text-muted-foreground mb-1">Phone Number</p>
                   {isEditingPhone ? (
                     <input type="tel" value={tempPhone} onChange={(e) => setTempPhone(e.target.value)}
-                      className={`font-semibold ${isDark ? 'text-white bg-slate-700' : 'text-slate-800 bg-slate-50'} px-2 py-1 rounded w-full`} autoFocus placeholder="+1 (555) 123-4567"
+                      className="font-semibold text-foreground bg-input-background border border-border px-2 py-1 rounded w-full" autoFocus placeholder="+1 (555) 123-4567"
                     />
                   ) : (
-                    <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{phone || 'Not set'}</p>
+                    <p className="font-semibold text-foreground">{phone || 'Not set'}</p>
                   )}
                 </div>
                 {isEditingPhone ? (
-                  <button onClick={handleSavePhone} className="text-violet-600"><Check size={20} /></button>
+                  <button onClick={handleSavePhone} className="text-primary"><Check size={20} /></button>
                 ) : (
-                  <button onClick={() => { setIsEditingPhone(true); setTempPhone(phone); }} className="text-violet-600"><Edit2 size={18} /></button>
+                  <button onClick={() => { setIsEditingPhone(true); setTempPhone(phone); }} className="text-primary"><Edit2 size={18} /></button>
                 )}
               </div>
             </div>
           </div>
         </motion.div>
 
-        {/* Bank Account */}
         <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="mt-6">
-          <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>Bank Account</h2>
-          
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Bank Account</h2>
+
           {bankLinked ? (
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-5 shadow-sm mb-3`}>
+            <div className="bg-card border border-border rounded-xl p-5 mb-3">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center shadow-lg">
-                  <Building2 size={24} className="text-white" />
+                <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center shadow-lg">
+                  <Building2 size={24} className="text-primary-foreground" />
                 </div>
                 <div className="flex-1">
-                  <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Bank Account Linked</p>
-                  <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Connected</p>
+                  <p className="font-bold text-foreground">Bank Account Linked</p>
+                  <p className="text-xs text-muted-foreground">Connected</p>
                 </div>
-                <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
-                  <Check size={16} className="text-green-600" strokeWidth={3} />
+                <div className="w-8 h-8 rounded-full bg-success/20 flex items-center justify-center">
+                  <Check size={16} className="text-success" strokeWidth={3} />
                 </div>
               </div>
             </div>
           ) : (
-            <button 
+            <button
               onClick={handleLinkBank}
               disabled={linkingBank}
-              className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-xl font-semibold shadow-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2 disabled:opacity-60"
+              className="w-full bg-primary text-primary-foreground py-4 rounded-xl font-semibold active:scale-[0.98] transition-transform flex items-center justify-center gap-2 disabled:opacity-60"
             >
               {linkingBank ? (
                 <><Loader2 size={20} className="animate-spin" /> Linking...</>
@@ -226,29 +218,28 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
             </button>
           )}
 
-          <div className={`${isDark ? 'bg-blue-900/30 border-blue-700' : 'bg-blue-50 border-blue-200'} border rounded-xl p-4 mt-4`}>
-            <p className={`text-sm ${isDark ? 'text-blue-300' : 'text-blue-900'}`}>
+          <div className="bg-secondary border border-border rounded-xl p-4 mt-4">
+            <p className="text-sm text-muted-foreground">
               Your bank account must be linked to create groups and join payment sessions.
             </p>
           </div>
         </motion.div>
 
-        {/* Payment Methods */}
         {paymentMethods.length > 0 && (
           <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="mt-6">
-            <h2 className={`text-sm font-semibold ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase tracking-wide mb-3`}>Payment Methods</h2>
+            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Payment Methods</h2>
             <div className="space-y-3">
               {paymentMethods.map((pm) => (
-                <div key={pm.id} className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-xl p-4 shadow-sm`}>
+                <div key={pm.id} className="bg-card border border-border rounded-xl p-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center">
-                      <CreditCard size={20} className="text-white" />
+                    <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
+                      <CreditCard size={20} className="text-primary-foreground" />
                     </div>
                     <div className="flex-1">
-                      <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                      <p className="font-semibold text-foreground">
                         {pm.brand ?? pm.type} •••• {pm.last_four}
                       </p>
-                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{pm.type}</p>
+                      <p className="text-xs text-muted-foreground">{pm.type}</p>
                     </div>
                   </div>
                 </div>

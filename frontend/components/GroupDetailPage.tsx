@@ -40,12 +40,10 @@ function MemberSelectionsSection({
   receiptDetail,
   realMembers,
   user,
-  isDark,
 }: {
   receiptDetail: { items: { id: string; name: string; price: number }[]; claims: Record<string, string[]>; members: { id: string; name: string }[] };
   realMembers: { id: string; name: string }[];
   user: { id?: string } | null;
-  isDark: boolean;
 }) {
   const itemsById = Object.fromEntries(receiptDetail.items.map((i) => [i.id, i]));
   const membersById = Object.fromEntries(receiptDetail.members.map((m) => [m.id, m]));
@@ -63,20 +61,20 @@ function MemberSelectionsSection({
   const entries = Object.entries(byMember);
   if (entries.length === 0) return null;
   return (
-    <div className={`mt-6 pt-6 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-      <h4 className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'} mb-3`}>Who selected what</h4>
+    <div className="mt-6 pt-6 border-t border-border">
+      <h4 className="text-sm font-semibold text-foreground mb-3">Who selected what</h4>
       <div className="space-y-3 text-left">
         {entries.map(([uid, { name, items, total }]) => (
-          <div key={uid} className={`rounded-xl p-3 ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
-            <p className={`font-semibold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
+          <div key={uid} className="rounded-xl p-3 bg-secondary/50">
+            <p className="font-semibold text-sm text-foreground">
               {uid === user?.id ? 'You' : name}
             </p>
-            <ul className={`text-xs mt-1 space-y-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            <ul className="text-xs mt-1 space-y-0.5 text-muted-foreground">
               {items.map((it, i) => (
                 <li key={i}>{it.name} — ${it.price.toFixed(2)}</li>
               ))}
             </ul>
-            <p className={`text-xs font-medium mt-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+            <p className="text-xs font-medium mt-1 text-muted-foreground">
               Subtotal: ${total.toFixed(2)}
             </p>
           </div>
@@ -106,7 +104,9 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const [hasReceipt, setHasReceipt] = useState(false);
   const [receiptTotal, setReceiptTotal] = useState(0);
   const [settlingPayment, setSettlingPayment] = useState(false);
-  
+  const [evenSplitSubtotal, setEvenSplitSubtotal] = useState<number | null>(null);
+  const [evenSplitTax, setEvenSplitTax] = useState<number | null>(null);
+
   const hasSelectedItems = !!pendingItemSplit || itemSplitData.hasSelectedItems;
   const yourItemsSubtotal = pendingItemSplit?.myAmount ?? itemSplitData.yourItemsTotal;
   const receiptTotalFromReceipt = pendingItemSplit?.receiptTotal ?? itemSplitData.receiptTotal;
@@ -138,8 +138,6 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
     }
   }, [serverSplitModePreference, receiptData]);
   
-  const isDark = theme === 'dark';
-
   const currentGroup = groups.find(g => g.id === groupId);
 
   // Use shared prefetch cache - data may already be available from App.tsx prefetch
@@ -200,7 +198,11 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       setSupportCode(freshCache.supportCode ?? null);
       setCardLastFour(freshCache.cardLastFour ?? null);
       setServerSplitModePreference(freshCache.splitModePreference ?? null);
-      setPendingItemSplit((freshCache as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null);
+      const cachedPending = (freshCache as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null;
+      setPendingItemSplit(cachedPending);
+      if (cachedPending?.draftTipPercentage != null) {
+        setTipPercentage(cachedPending.draftTipPercentage);
+      }
       const latestCached = freshCache.receipts.find((r: any) => r.total != null);
       if (latestCached?.total) {
         setReceiptTotal(latestCached.total);
@@ -228,7 +230,11 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setSupportCode((groupData as { supportCode?: string | null }).supportCode ?? null);
         setCardLastFour(groupData.cardLastFour ?? null);
         setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
-        setPendingItemSplit((groupData as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null);
+        const nextPending = (groupData as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null;
+        setPendingItemSplit(nextPending);
+        if (nextPending?.draftTipPercentage != null) {
+          setTipPercentage(nextPending.draftTipPercentage);
+        }
       }
       const receipts = receiptsData ?? [];
       setRealReceipts(receipts);
@@ -259,12 +265,23 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   }, [groupId]);
 
   const { lastGroupUpdatedId, lastGroupUpdatedAt, groupsChangedAt } = useSocket();
-  // Refetch when this group was updated (receipt, tip, claims) or when any group list changed (e.g. someone joined/left)
+  const [refetchOnVisible, setRefetchOnVisible] = useState(0);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        setRefetchOnVisible((n) => n + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
+  // Refetch when this group was updated (receipt, tip, claims), group list changed (e.g. someone joined/left), or user returned to tab
   useEffect(() => {
     if (!groupId) return;
     const groupJustUpdated = lastGroupUpdatedId === groupId && lastGroupUpdatedAt > 0;
     const anyGroupsChanged = groupsChangedAt > 0;
-    if (!groupJustUpdated && !anyGroupsChanged) return;
+    if (!groupJustUpdated && !anyGroupsChanged && refetchOnVisible === 0) return;
     Promise.all([
       api.groups.get(groupId).catch(() => null),
       api.receipts.list(groupId).catch(() => [] as any[]),
@@ -280,7 +297,11 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setSupportCode((groupData as { supportCode?: string | null }).supportCode ?? null);
         setCardLastFour(groupData.cardLastFour ?? null);
         setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
-        setPendingItemSplit((groupData as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null);
+        const nextPending = (groupData as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null;
+        setPendingItemSplit(nextPending);
+        if (nextPending?.draftTipPercentage != null) {
+          setTipPercentage(nextPending.draftTipPercentage);
+        }
       }
       const receipts = receiptsData ?? [];
       setRealReceipts(receipts);
@@ -317,7 +338,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         });
       }
     });
-  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, groupsChangedAt]);
+  }, [groupId, lastGroupUpdatedId, lastGroupUpdatedAt, groupsChangedAt, refetchOnVisible]);
 
   // If view-only but breakdown missing (e.g. from batch cache), refetch once to get full settlement breakdown
   useEffect(() => {
@@ -338,6 +359,32 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   }, [receiptForItemSplit?.id]);
 
   useReceiptClaimsRealtime(receiptForItemSplit?.id ?? null, refetchReceiptDetail);
+
+  // For split-evenly: fetch receipt totals (subtotal, tax) for breakdown display
+  useEffect(() => {
+    if (!hasReceipt || realReceipts.length === 0) {
+      setEvenSplitSubtotal(null);
+      setEvenSplitTax(null);
+      return;
+    }
+    const latestWithTotal = realReceipts.find((r: { total?: number | null }) => r.total != null);
+    if (!latestWithTotal?.id) return;
+    api.receipts.get(latestWithTotal.id).then((data: { final_snapshot?: { totals?: { subtotal?: number; tax?: number; total?: number } }; parsed_output?: { totals?: { subtotal?: number; tax?: number; total?: number } } }) => {
+      const totals = data.final_snapshot?.totals ?? data.parsed_output?.totals;
+      if (totals) {
+        const sub = totals.subtotal ?? null;
+        const taxVal = totals.tax ?? (totals.total != null && sub != null && totals.total >= sub ? totals.total - sub : null);
+        setEvenSplitSubtotal(sub);
+        setEvenSplitTax(taxVal != null ? taxVal : 0);
+      } else {
+        setEvenSplitSubtotal(null);
+        setEvenSplitTax(null);
+      }
+    }).catch(() => {
+      setEvenSplitSubtotal(null);
+      setEvenSplitTax(null);
+    });
+  }, [hasReceipt, realReceipts, groupId]);
 
   // Fetch receipt detail (items + claims) for item-split receipt to show member selections
   useEffect(() => {
@@ -542,57 +589,55 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   };
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
-      {/* Header */}
-      <motion.div 
+    <div className="min-h-screen flex flex-col bg-background">
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.12 }}
-        className={`${isDark ? 'bg-slate-800/95 border-slate-700' : 'bg-white/95 border-slate-200'} backdrop-blur-xl border-b px-5 py-4`}
+        className="bg-card/95 backdrop-blur-xl border-b border-border px-5 py-4"
       >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <button 
+            <button
               onClick={() => onNavigate('groups')}
-              className={`w-10 h-10 rounded-[14px] ${isDark ? 'bg-slate-700/80' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform`}
+              className="w-10 h-10 rounded-[14px] bg-secondary flex items-center justify-center active:scale-95 transition-transform"
             >
-              <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-purple-600'} strokeWidth={2.5} />
+              <ChevronLeft size={20} className="text-foreground" strokeWidth={2.5} />
             </button>
             <div>
-              <h1 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <h1 className="text-xl font-bold text-foreground">
                 {baseGroup.name}
               </h1>
             </div>
           </div>
-          <button 
+          <button
             onClick={() => setShowMenu(!showMenu)}
-            className={`w-10 h-10 rounded-[14px] ${isDark ? 'bg-slate-700/80' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} flex items-center justify-center active:scale-95 transition-transform relative`}
+            className="w-10 h-10 rounded-[14px] bg-secondary flex items-center justify-center active:scale-95 transition-transform relative"
           >
-            <MoreVertical size={18} className={isDark ? 'text-white' : 'text-purple-600'} />
+            <MoreVertical size={18} className="text-foreground" />
           </button>
-          
-          {/* Dropdown Menu */}
+
           {showMenu && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
               <motion.div
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className={`absolute right-5 top-20 w-56 ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl shadow-2xl overflow-hidden z-20 border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
+                className="absolute right-5 top-20 w-56 bg-card rounded-2xl shadow-2xl overflow-hidden z-20 border border-border"
               >
                 {!isCreator && (
-                  <button 
+                  <button
                     onClick={() => { setShowLeaveModal(true); setShowMenu(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-gray-50'} transition-colors border-b ${isDark ? 'border-slate-700' : 'border-gray-200'}`}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent transition-colors border-b border-border"
                   >
                     <LogOut size={18} className="text-orange-500" />
                     <span className="text-sm font-medium text-orange-500">Leave Group</span>
                   </button>
                 )}
                 {isCreator && (
-                  <button 
+                  <button
                     onClick={() => { setShowDeleteModal(true); setShowMenu(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700' : 'hover:bg-gray-50'} transition-colors`}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-accent transition-colors"
                   >
                     <Trash2 size={18} className="text-red-500" />
                     <span className="text-sm font-medium text-red-500">Delete Group</span>
@@ -603,53 +648,50 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           )}
         </div>
 
-        {/* Support code for support tickets */}
         {supportCode && (
-          <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-2`}>
+          <p className="text-xs text-muted-foreground mt-2">
             Support ID: <span className="font-mono font-semibold">{supportCode}</span>
           </p>
         )}
 
-        {/* Virtual card - links to card details */}
         {(cardLastFour || virtualCards.some(c => c.groupId === groupId)) && (
           <button
             onClick={() => onNavigate('cardDetails', groupId ?? undefined)}
-            className={`w-full mt-3 rounded-2xl p-4 flex items-center justify-between ${isDark ? 'bg-slate-700/80' : 'bg-gradient-to-br from-purple-100 to-indigo-100'} active:scale-[0.99] transition-transform`}
+            className="w-full mt-3 mb-6 rounded-2xl p-5 flex items-center justify-between bg-card border border-border active:scale-[0.99] transition-transform"
           >
-            <div className="flex items-center gap-3">
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isDark ? 'bg-slate-600' : 'bg-white/80'}`}>
-                <CreditCard size={24} className={isDark ? 'text-white' : 'text-purple-600'} />
+            <div className="flex items-center gap-4">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center bg-muted/50">
+                <CreditCard size={22} className="text-muted-foreground" strokeWidth={1.5} />
               </div>
-              <div className="text-left">
-                <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>Virtual Group Card</p>
-                <p className={`text-xs font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              <div className="text-left min-w-0">
+                <p className="text-sm font-medium text-foreground">Virtual Group Card</p>
+                <p className="text-xs font-mono text-muted-foreground tracking-wide mt-0.5">
                   •••• •••• •••• {cardLastFour ?? virtualCards.find(c => c.groupId === groupId)?.cardLastFour ?? '----'}
                 </p>
               </div>
             </div>
-            <div className="text-right">
-              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Balance</p>
-              <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            <div className="text-right shrink-0 pl-3">
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Balance</p>
+              <p className="text-lg font-semibold tabular-nums text-foreground">
                 ${(virtualCards.find(c => c.groupId === groupId)?.groupTotal ?? 0).toFixed(2)}
               </p>
             </div>
           </button>
         )}
 
-        {/* Split Mode Toggle - hidden when view-only or when pending receipt (locked to item split) */}
         {!isViewOnly && !splitModeLocked && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.12 }}
-          className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-100/80'} rounded-[16px] p-1 flex gap-1`}
+          className="bg-secondary/80 rounded-[16px] p-1 flex gap-1"
         >
           <button
             onClick={() => handleSplitModeChange('even')}
             className={`flex-1 py-2.5 rounded-[12px] font-semibold text-[15px] transition-all ${
               splitMode === 'even'
-                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
-                : `${isDark ? 'text-slate-400' : 'text-slate-600'}`
+                ? 'bg-primary text-primary-foreground shadow-lg'
+                : 'text-muted-foreground'
             }`}
           >
             Split Evenly
@@ -658,8 +700,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             onClick={() => handleSplitModeChange('item')}
             className={`flex-1 py-2.5 rounded-[12px] font-semibold text-[15px] transition-all ${
               splitMode === 'item'
-                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
-                : `${isDark ? 'text-slate-400' : 'text-slate-600'}`
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground'
             }`}
           >
             Item Split
@@ -675,31 +717,31 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           <motion.div
             initial={{ y: 8, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-6 shadow-lg border mb-5`}
+            className={`bg-card border border-border rounded-[24px] p-6 shadow-lg border mb-5`}
           >
             <div className="flex items-center gap-3 mb-6">
               <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
                 <Check size={24} className="text-green-600" />
               </div>
               <div>
-                <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Payment Complete</h3>
-                <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Everyone has been charged</p>
+                <h3 className={`text-lg font-bold text-foreground`}>Payment Complete</h3>
+                <p className={`text-sm text-muted-foreground`}>Everyone has been charged</p>
               </div>
             </div>
-            <h4 className={`text-sm font-semibold ${isDark ? 'text-slate-300' : 'text-slate-700'} mb-3`}>What each person paid</h4>
-            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-3`}>Tip is split by the host’s choice; tax is proportional to what you ordered.</p>
+            <h4 className={`text-sm font-semibold text-foreground mb-3`}>What each person paid</h4>
+            <p className={`text-xs text-muted-foreground mb-3`}>Tip is split by the host’s choice; tax is proportional to what you ordered.</p>
             <div className="space-y-4">
               {lastSettledAllocations.map((a) => {
                 const breakdown = lastSettledBreakdown?.[a.user_id];
                 const items = lastSettledItemsPerUser?.[a.user_id];
                 return (
-                  <div key={a.user_id} className={`rounded-xl p-4 ${isDark ? 'bg-slate-700/50' : 'bg-slate-50'}`}>
+                  <div key={a.user_id} className={`rounded-xl p-4 bg-secondary/50`}>
                     <div className="flex justify-between items-center mb-2">
-                      <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>{a.name}</span>
+                      <span className={`font-semibold text-foreground`}>{a.name}</span>
                       <span className="font-bold text-green-600">${a.amount.toFixed(2)}</span>
                     </div>
                     {breakdown && (
-                      <div className={`text-xs space-y-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      <div className={`text-xs space-y-1 text-muted-foreground`}>
                         <div className="flex justify-between">
                           <span>Items</span>
                           <span>${breakdown.subtotal.toFixed(2)}</span>
@@ -719,9 +761,9 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                       </div>
                     )}
                     {items && items.length > 0 && (
-                      <div className={`mt-2 pt-2 border-t ${isDark ? 'border-slate-600' : 'border-slate-200'}`}>
-                        <p className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'} mb-1`}>Selected items</p>
-                        <ul className={`text-xs space-y-0.5 ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
+                      <div className={`mt-2 pt-2 border-t border-border`}>
+                        <p className={`text-xs font-medium text-muted-foreground mb-1`}>Selected items</p>
+                        <ul className={`text-xs space-y-0.5 text-muted-foreground`}>
                           {items.map((it, i) => (
                             <li key={i} className="flex justify-between">
                               <span className="truncate pr-2">{it.name}</span>
@@ -742,7 +784,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         <motion.div
           initial={{ y: 10, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[20px] p-4 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5 relative`}
+          className={`bg-card border border-border rounded-[20px] p-4 shadow-lg  border mb-5 relative`}
         >
           <div className="flex items-center justify-between">
             <button 
@@ -753,7 +795,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 {visibleAvatars.map((avatar, index) => (
                   <div
                     key={avatar.id}
-                    className={`w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br ${avatar.color} flex items-center justify-center text-white text-xs font-bold shadow-lg border-2 ${isDark ? 'border-slate-800' : 'border-white'}`}
+                    className={`w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br ${avatar.color} flex items-center justify-center text-white text-xs font-bold shadow-lg border-2 border-border`}
                     style={{ marginLeft: index > 0 ? '-12px' : '0', zIndex: visibleAvatars.length - index }}
                   >
                     {avatar.avatarUrl ? (
@@ -765,7 +807,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 ))}
                 {remainingCount > 0 && (
                   <div
-                    className={`w-10 h-10 rounded-full ${isDark ? 'bg-slate-700' : 'bg-slate-200'} flex items-center justify-center text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'} shadow-lg border-2 ${isDark ? 'border-slate-800' : 'border-white'}`}
+                    className={`w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-xs font-bold text-foreground shadow-lg border-2 border-border`}
                     style={{ marginLeft: '-12px', zIndex: 0 }}
                   >
                     +{remainingCount}
@@ -773,10 +815,10 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 )}
               </div>
               <div>
-                <p className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                <p className={`text-sm font-semibold text-foreground`}>
                   {memberAvatars.length} members
                 </p>
-                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                <p className={`text-xs text-muted-foreground`}>
                   in this group
                 </p>
               </div>
@@ -784,7 +826,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             {!isViewOnly && (
             <button 
               onClick={() => setShowInviteSheet(true)}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-gradient-to-r from-violet-600 to-purple-600 text-white font-semibold text-sm shadow-lg shadow-purple-500/30 active:scale-95 transition-transform"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-full bg-primary text-primary-foreground font-semibold text-sm active:scale-95 transition-transform"
             >
               <UserPlus size={16} strokeWidth={2.5} />
               Invite
@@ -805,10 +847,10 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -10, scale: 0.98 }}
                   transition={{ duration: 0.2 }}
-                  className={`absolute left-4 right-4 top-[calc(100%+8px)] ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl shadow-2xl overflow-hidden z-40 border ${isDark ? 'border-slate-700' : 'border-slate-200'}`}
+                  className={`absolute left-4 right-4 top-[calc(100%+8px)] bg-card rounded-2xl shadow-2xl overflow-hidden z-40 border border-border`}
                 >
-                  <div className={`px-4 py-3 border-b ${isDark ? 'border-slate-700' : 'border-slate-200'}`}>
-                    <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  <div className={`px-4 py-3 border-b border-border`}>
+                    <p className={`text-sm font-bold text-foreground`}>
                       All Members ({memberAvatars.length})
                     </p>
                   </div>
@@ -819,7 +861,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                       return (
                         <div
                           key={member.id}
-                          className={`flex items-center gap-3 px-4 py-3 ${isDark ? 'hover:bg-slate-700/50' : 'hover:bg-gray-50'} transition-colors border-b ${isDark ? 'border-slate-700/50' : 'border-gray-100'} last:border-0`}
+                          className={`flex items-center gap-3 px-4 py-3 hover:bg-accent transition-colors border-b border-border last:border-0`}
                         >
                           <div
                             className={`w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br ${member.color} flex items-center justify-center text-white text-xs font-bold shadow-md`}
@@ -831,11 +873,11 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'} text-sm truncate`}>
+                            <p className={`font-semibold text-foreground text-sm truncate`}>
                               {member.name}
                             </p>
                             {isMe && (
-                              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>You</p>
+                              <p className={`text-xs text-muted-foreground`}>You</p>
                             )}
                             {isMemberCreator && (
                               <p className="text-xs text-violet-500 font-medium">Group Creator</p>
@@ -866,160 +908,37 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         {/* Split Evenly Mode - hidden when view-only */}
         {!isViewOnly && (
         <AnimatePresence mode="wait">
-          {effectiveSplitMode === 'even' && (
+          {!hasReceipt ? (
+            /* Single empty state for new groups: one "Add a Receipt" regardless of Split Evenly vs Item Split */
             <motion.div
-              key="even"
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 10 }}
+              key="no-receipt"
+              initial={{ y: 8, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
               transition={{ duration: 0.15 }}
+              className="bg-card border border-border rounded-[24px] p-8 text-center"
             >
-              {!hasReceipt ? (
-                <motion.div
-                  initial={{ y: 8, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.15 }}
-                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
+              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                <Receipt size={28} className="text-primary" />
+              </div>
+              <h3 className="text-lg font-bold text-foreground mb-2">
+                {isCreator ? 'Add a Receipt' : 'Waiting for Receipt'}
+              </h3>
+              <p className="text-sm text-muted-foreground mb-6">
+                {isCreator
+                  ? 'Upload your receipt to get started. You can split the bill evenly or by item after uploading.'
+                  : 'Only the group host can add a receipt'}
+              </p>
+              {isCreator && (
+                <button
+                  onClick={handleAddReceipt}
+                  className="w-full bg-primary text-primary-foreground py-3.5 rounded-[16px] font-bold active:scale-[0.98] transition-transform"
                 >
-                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-purple-100'} flex items-center justify-center mx-auto mb-4`}>
-                    <Receipt size={28} className="text-purple-600" />
-                  </div>
-                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>
-                    {isCreator ? 'Add a Receipt' : 'Waiting for Receipt'}
-                  </h3>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
-                    {isCreator ? 'Upload your receipt to split the bill evenly among all members' : 'Only the group host can add a receipt'}
-                  </p>
-                  {isCreator && (
-                    <button
-                      onClick={handleAddReceipt}
-                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
-                    >
-                      Add Receipt
-                    </button>
-                  )}
-                </motion.div>
-              ) : (
-                <>
-                  {/* Receipt Summary */}
-                  <motion.div
-                    initial={{ y: 6, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.12 }}
-                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
-                  >
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-12 h-12 rounded-[14px] bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg">
-                        <Receipt size={24} className="text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-lg`}>Receipt Added</p>
-                        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Bill will be split evenly</p>
-                      </div>
-                      <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
-                        <Check size={18} className="text-green-600" strokeWidth={3} />
-                      </div>
-                    </div>
-
-                    <div className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-50'} rounded-[16px] p-4 space-y-2`}>
-                      <div className="flex justify-between items-center">
-                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Subtotal</span>
-                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${receiptTotal.toFixed(2)}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Tip ({tipPercentage}%)</span>
-                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${tipAmount.toFixed(2)}</span>
-                      </div>
-                      <div className={`border-t ${isDark ? 'border-slate-600' : 'border-slate-200'} pt-2 mt-2`}>
-                        <div className="flex justify-between items-center">
-                          <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Total</span>
-                          <span className={`font-bold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>${totalWithTip.toFixed(2)}</span>
-                        </div>
-                      </div>
-                      <div className={`${isDark ? 'bg-purple-900/30' : 'bg-purple-50'} rounded-xl p-3 mt-3`}>
-                        <div className="flex justify-between items-center">
-                          <span className={`text-sm font-semibold ${isDark ? 'text-purple-300' : 'text-purple-900'}`}>Your Share</span>
-                          <span className={`font-bold text-xl ${isDark ? 'text-purple-300' : 'text-purple-600'}`}>${yourShare.toFixed(2)}</span>
-                        </div>
-                        <p className={`text-xs ${isDark ? 'text-purple-400' : 'text-purple-600'} mt-1`}>
-                          Split among {memberAvatars.length} members
-                        </p>
-                      </div>
-                    </div>
-                  </motion.div>
-
-                  {/* Tip Slider */}
-                  <motion.div
-                    initial={{ y: 6, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.12 }}
-                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <DollarSign size={20} className="text-amber-500" />
-                        <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Add Tip</h3>
-                      </div>
-                      <span className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
-                        {tipPercentage}%
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-4 gap-2 mb-4">
-                      {[10, 15, 18, 20].map((tip) => (
-                        <button
-                          key={tip}
-                          onClick={() => setTipPercentage(tip)}
-                          className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
-                            tipPercentage === tip
-                              ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
-                              : `${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'}`
-                          }`}
-                        >
-                          {tip}%
-                        </button>
-                      ))}
-                    </div>
-                    <div className="relative">
-                      <input
-                        type="range" min="0" max="30" value={tipPercentage}
-                        onChange={(e) => setTipPercentage(parseInt(e.target.value))}
-                        className="w-full h-2 rounded-full appearance-none cursor-pointer"
-                        style={{
-                          background: `linear-gradient(to right, rgb(139, 92, 246) 0%, rgb(168, 85, 247) ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} 100%)`
-                        }}
-                      />
-                      <div className="flex justify-between mt-2">
-                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>0%</span>
-                        <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>30%</span>
-                      </div>
-                    </div>
-                  </motion.div>
-
-                  {/* Complete Payment - creator only */}
-                  {isCreator && (
-                    <motion.button
-                      initial={{ y: 6, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.12 }}
-                      onClick={handleCompletePayment}
-                      disabled={settlingPayment}
-                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
-                    >
-                      {settlingPayment ? 'Processing...' : `Complete Payment • $${yourShare.toFixed(2)}`}
-                    </motion.button>
-                  )}
-                  {!isCreator && (
-                    <p className={`text-sm text-center py-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                      Only the group creator can complete payment.
-                    </p>
-                  )}
-                </>
+                  Add Receipt
+                </button>
               )}
             </motion.div>
-          )}
-
-          {/* Item Split Mode */}
-          {effectiveSplitMode === 'item' && (
+          ) : hasReceiptForItemSplit ? (
+            /* Item split block when we have an item-split receipt (everyone sees same summary type; tip syncs from host) */
             <motion.div
               key="item"
               initial={{ opacity: 0, x: 10 }}
@@ -1029,20 +948,20 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             >
               {hasSelectedItems ? (
                 <>
-                  {/* Selected Items Summary + Tip + Complete (show after item-split confirm even though receipt is now 'completed') */}
+                  {/* Selected Items Summary + Tip + Complete (show after item-split confirm) */}
                   <motion.div
                     initial={{ y: 6, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ duration: 0.12 }}
-                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
+                    className={`bg-card border border-border rounded-[24px] p-5 shadow-lg  border mb-5`}
                   >
                     <div className="flex items-center gap-3 mb-4">
                       <div className="w-12 h-12 rounded-[14px] bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg">
                         <Receipt size={24} className="text-white" />
                       </div>
                       <div className="flex-1">
-                        <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-lg`}>Items Selected</p>
-                        <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Your items from receipt</p>
+                        <p className={`font-bold text-foreground text-lg`}>Items Selected</p>
+                        <p className={`text-sm text-muted-foreground`}>Your items from receipt</p>
                       </div>
                       {receiptForItemSplit && isCreator && (
                         <button
@@ -1054,25 +973,25 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                       )}
                     </div>
 
-                    <div className={`${isDark ? 'bg-slate-700/50' : 'bg-slate-50'} rounded-[16px] p-4 space-y-2`}>
+                    <div className={`bg-secondary/50 rounded-[16px] p-4 space-y-2`}>
                       <div className="flex justify-between items-center">
-                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Your Items</span>
-                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${yourItemsSubtotal.toFixed(2)}</span>
+                        <span className={`text-sm text-muted-foreground`}>Your Items</span>
+                        <span className={`font-semibold text-foreground`}>${yourItemsSubtotal.toFixed(2)}</span>
                       </div>
                       {yourTaxShare > 0 && (
                         <div className="flex justify-between items-center">
-                          <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Tax</span>
-                          <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${yourTaxShare.toFixed(2)}</span>
+                          <span className={`text-sm text-muted-foreground`}>Tax</span>
+                          <span className={`font-semibold text-foreground`}>${yourTaxShare.toFixed(2)}</span>
                         </div>
                       )}
                       <div className="flex justify-between items-center">
-                        <span className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Tip ({tipPercentage}%)</span>
-                        <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>${tipAmount.toFixed(2)}</span>
+                        <span className={`text-sm text-muted-foreground`}>Tip ({tipPercentage}%)</span>
+                        <span className={`font-semibold text-foreground`}>${tipAmount.toFixed(2)}</span>
                       </div>
-                      <div className={`border-t ${isDark ? 'border-slate-600' : 'border-slate-200'} pt-2 mt-2`}>
+                      <div className={`border-t border-border pt-2 mt-2`}>
                         <div className="flex justify-between items-center">
-                          <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Your Total</span>
-                          <span className={`font-bold text-lg ${isDark ? 'text-white' : 'text-slate-900'}`}>${totalWithTip.toFixed(2)}</span>
+                          <span className={`font-bold text-foreground`}>Your Total</span>
+                          <span className={`font-bold text-lg text-foreground`}>${totalWithTip.toFixed(2)}</span>
                         </div>
                       </div>
                     </div>
@@ -1083,14 +1002,14 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                     initial={{ y: 6, opacity: 0 }}
                     animate={{ y: 0, opacity: 1 }}
                     transition={{ duration: 0.12 }}
-                    className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-5 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border mb-5`}
+                    className={`bg-card border border-border rounded-[24px] p-5 shadow-lg  border mb-5`}
                   >
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-2">
                         <DollarSign size={20} className="text-amber-500" />
-                        <h3 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{isCreator ? 'Add Tip' : 'Tip'}</h3>
+                        <h3 className={`font-bold text-foreground`}>{isCreator ? 'Add Tip' : 'Tip'}</h3>
                       </div>
-                      <span className="text-2xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+                      <span className="text-2xl font-bold text-primary">
                         {tipPercentage}%
                       </span>
                     </div>
@@ -1109,8 +1028,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                               }}
                               className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
                                 tipPercentage === tip
-                                  ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-purple-500/30'
-                                  : `${isDark ? 'bg-slate-700 text-slate-300' : 'bg-slate-100 text-slate-700'}`
+                                  ? 'bg-primary text-primary-foreground'
+                                  : `bg-secondary text-muted-foreground`
                               }`}
                             >
                               {tip}%
@@ -1130,17 +1049,17 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                             }}
                             className="w-full h-2 rounded-full appearance-none cursor-pointer"
                             style={{
-                              background: `linear-gradient(to right, rgb(139, 92, 246) 0%, rgb(168, 85, 247) ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} ${(tipPercentage / 30) * 100}%, ${isDark ? 'rgb(51, 65, 85)' : 'rgb(226, 232, 240)'} 100%)`
+                              background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${(tipPercentage / 30) * 100}%, var(--muted) ${(tipPercentage / 30) * 100}%, var(--muted) 100%)`
                             }}
                           />
                           <div className="flex justify-between mt-2">
-                            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>0%</span>
-                            <span className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>30%</span>
+                            <span className={`text-xs text-muted-foreground`}>0%</span>
+                            <span className={`text-xs text-muted-foreground`}>30%</span>
                           </div>
                         </div>
                       </>
                     ) : (
-                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      <p className={`text-sm text-muted-foreground`}>
                         Host is setting the tip. Your total updates above.
                       </p>
                     )}
@@ -1153,13 +1072,13 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                       transition={{ duration: 0.12 }}
                       onClick={handleCompletePayment}
                       disabled={settlingPayment}
-                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-[20px] font-bold shadow-2xl shadow-purple-500/50 active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
+                      className="w-full bg-primary text-primary-foreground py-4 rounded-[20px] font-bold active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
                     >
                       {settlingPayment ? 'Processing...' : `Complete Payment • $${totalWithTip.toFixed(2)}`}
                     </motion.button>
                   )}
                   {!isCreator && (
-                    <p className={`text-sm text-center py-3 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    <p className={`text-sm text-center py-3 text-muted-foreground`}>
                       Only the group creator can complete payment.
                     </p>
                   )}
@@ -1169,65 +1088,205 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                   initial={{ y: 8, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ duration: 0.15 }}
-                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
+                  className={`bg-card border border-border rounded-[24px] p-8 shadow-lg  border text-center`}
                 >
                   {!receiptReadyForMemberSelection && !isCreator ? (
                     <>
-                      <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-amber-100'} flex items-center justify-center mx-auto mb-4`}>
+                      <div className={`w-16 h-16 rounded-full bg-secondary flex items-center justify-center mx-auto mb-4`}>
                         <Receipt size={28} className="text-amber-600" />
                       </div>
-                      <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Waiting for host to confirm receipt</h3>
-                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      <h3 className={`text-lg font-bold text-foreground mb-2`}>Waiting for host to confirm receipt</h3>
+                      <p className={`text-sm text-muted-foreground`}>
                         The host is reviewing the receipt. You can select your items once they confirm.
                       </p>
                     </>
                   ) : (
                     <>
-                      <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
+                      <div className={`w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4`}>
                         <Receipt size={28} className="text-indigo-600" />
                       </div>
-                      <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>Select Your Items</h3>
-                      <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+                      <h3 className={`text-lg font-bold text-foreground mb-2`}>Select Your Items</h3>
+                      <p className={`text-sm text-muted-foreground mb-6`}>
                         A receipt has been uploaded. Choose what you ordered to split by item.
                       </p>
                       <button
                         onClick={() => groupId && receiptForItemSplit && onNavigateToReceiptItems?.(groupId, receiptForItemSplit.id)}
-                        className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                        className="w-full bg-primary text-primary-foreground py-3.5 rounded-[16px] font-bold active:scale-[0.98] transition-transform"
                       >
                         Select Your Items
                       </button>
                       {receiptDetail && receiptDetail.items.length > 0 && (
-                        <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} isDark={isDark} />
+                        <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} />
                       )}
                     </>
                   )}
                 </motion.div>
-              ) : (
-                <motion.div
-                  initial={{ y: 8, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.15 }}
-                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[24px] p-8 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border text-center`}
-                >
-                  <div className={`w-16 h-16 rounded-full ${isDark ? 'bg-slate-700' : 'bg-indigo-100'} flex items-center justify-center mx-auto mb-4`}>
-                    <Receipt size={28} className="text-indigo-600" />
-                  </div>
-                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} mb-2`}>
-                    {isCreator ? 'Upload a Receipt' : 'Waiting for Receipt'}
-                  </h3>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
-                    {isCreator ? 'Upload your receipt and choose what you ordered to split by item' : 'The group creator needs to upload a receipt first'}
-                  </p>
+              ) : null}
+            </motion.div>
+          ) : effectiveSplitMode === 'even' ? (
+            <motion.div
+              key="even"
+              initial={{ opacity: 0, x: -10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 10 }}
+              transition={{ duration: 0.15 }}
+            >
+              <>
+                {/* Receipt Summary - only when no item-split receipt (true even split) */}
+                  <motion.div
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    className={`bg-card border border-border rounded-[24px] p-5 shadow-lg  border mb-5`}
+                  >
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-12 h-12 rounded-[14px] bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg">
+                        <Receipt size={24} className="text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <p className={`font-bold text-foreground text-lg`}>Receipt Added</p>
+                        <p className={`text-sm text-muted-foreground`}>Bill will be split evenly</p>
+                      </div>
+                      <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                        <Check size={18} className="text-green-600" strokeWidth={3} />
+                      </div>
+                    </div>
+
+                    <div className={`bg-secondary/50 rounded-[16px] p-4 space-y-2`}>
+                      <div className="flex justify-between items-center">
+                        <span className={`text-sm text-muted-foreground`}>Subtotal</span>
+                        <span className={`font-semibold text-foreground`}>${(evenSplitSubtotal ?? receiptTotal).toFixed(2)}</span>
+                      </div>
+                      {(evenSplitTax ?? 0) > 0 && (
+                        <div className="flex justify-between items-center">
+                          <span className={`text-sm text-muted-foreground`}>Tax</span>
+                          <span className={`font-semibold text-foreground`}>${(evenSplitTax ?? 0).toFixed(2)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center">
+                        <span className={`text-sm text-muted-foreground`}>Tip ({tipPercentage}%)</span>
+                        <span className={`font-semibold text-foreground`}>${tipAmount.toFixed(2)}</span>
+                      </div>
+                      <div className={`border-t border-border pt-2 mt-2`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`font-bold text-foreground`}>Total</span>
+                          <span className={`font-bold text-lg text-foreground`}>${totalWithTip.toFixed(2)}</span>
+                        </div>
+                      </div>
+                      <div className={`bg-primary/10 rounded-xl p-3 mt-3`}>
+                        <div className="flex justify-between items-center">
+                          <span className={`text-sm font-semibold text-foreground`}>Your Share</span>
+                          <span className={`font-bold text-xl text-foreground`}>${yourShare.toFixed(2)}</span>
+                        </div>
+                        <p className={`text-xs text-muted-foreground mt-1`}>
+                          Split among {memberAvatars.length} members
+                        </p>
+                      </div>
+                    </div>
+                  </motion.div>
+
+                  {/* Tip Slider */}
+                  <motion.div
+                    initial={{ y: 6, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ duration: 0.12 }}
+                    className={`bg-card border border-border rounded-[24px] p-5 shadow-lg  border mb-5`}
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <DollarSign size={20} className="text-amber-500" />
+                        <h3 className={`font-bold text-foreground`}>Add Tip</h3>
+                      </div>
+                      <span className="text-2xl font-bold text-primary">
+                        {tipPercentage}%
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 mb-4">
+                      {[10, 15, 18, 20].map((tip) => (
+                        <button
+                          key={tip}
+                          onClick={() => setTipPercentage(tip)}
+                          className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
+                            tipPercentage === tip
+                              ? 'bg-primary text-primary-foreground'
+                              : `bg-secondary text-muted-foreground`
+                          }`}
+                        >
+                          {tip}%
+                        </button>
+                      ))}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="range" min="0" max="30" value={tipPercentage}
+                        onChange={(e) => setTipPercentage(parseInt(e.target.value))}
+                        className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                        style={{
+                          background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${(tipPercentage / 30) * 100}%, var(--muted) ${(tipPercentage / 30) * 100}%, var(--muted) 100%)`
+                        }}
+                      />
+                      <div className="flex justify-between mt-2">
+                        <span className={`text-xs text-muted-foreground`}>0%</span>
+                        <span className={`text-xs text-muted-foreground`}>30%</span>
+                      </div>
+                    </div>
+                  </motion.div>
+
+                  {/* Complete Payment - creator only */}
                   {isCreator && (
-                    <button
-                      onClick={handleAddReceipt}
-                      className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3.5 rounded-[16px] font-bold shadow-xl shadow-purple-500/30 active:scale-[0.98] transition-transform"
+                    <motion.button
+                      initial={{ y: 6, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ duration: 0.12 }}
+                      onClick={handleCompletePayment}
+                      disabled={settlingPayment}
+                      className="w-full bg-primary text-primary-foreground py-4 rounded-[20px] font-bold active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
                     >
-                      Scan Receipt
-                    </button>
+                      {settlingPayment ? 'Processing...' : `Complete Payment • $${yourShare.toFixed(2)}`}
+                    </motion.button>
                   )}
-                </motion.div>
-              )}
+                  {!isCreator && (
+                    <p className={`text-sm text-center py-3 text-muted-foreground`}>
+                      Only the group creator can complete payment.
+                    </p>
+                  )}
+                </>
+            </motion.div>
+          ) : (
+            /* Item Split Mode (fallback) - item-split receipts are handled above via hasReceiptForItemSplit */
+            <motion.div
+              key="item"
+              initial={{ opacity: 0, x: 10 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.15 }}
+            >
+              <motion.div
+                initial={{ y: 8, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 0.15 }}
+                className={`bg-card border border-border rounded-[24px] p-8 shadow-lg  border text-center`}
+              >
+                <div className={`w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4`}>
+                  <Receipt size={28} className="text-indigo-600" />
+                </div>
+                <h3 className={`text-lg font-bold text-foreground mb-2`}>
+                  {isCreator ? 'Upload a Receipt' : 'Waiting for Receipt'}
+                </h3>
+                <p className={`text-sm text-muted-foreground mb-6`}>
+                  {isCreator
+                    ? 'Upload your receipt to split by item.'
+                    : 'Only the group host can add a receipt.'}
+                </p>
+                {isCreator && (
+                  <button
+                    onClick={handleAddReceipt}
+                    className="w-full bg-primary text-primary-foreground py-3.5 rounded-[16px] font-bold active:scale-[0.98] transition-transform"
+                  >
+                    Add Receipt
+                  </button>
+                )}
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -1241,7 +1300,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             transition={{ duration: 0.15 }}
             className="mt-6"
           >
-            <h2 className={`text-xs font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-3 px-1`}>
+            <h2 className={`text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3 px-1`}>
               Recent Activity
             </h2>
             <div className="space-y-3">
@@ -1251,7 +1310,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                   initial={{ x: -6, opacity: 0 }}
                   animate={{ x: 0, opacity: 1 }}
                   transition={{ delay: index * 0.02, duration: 0.12 }}
-                  className={`${isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-slate-100'} rounded-[18px] p-4 shadow-lg ${isDark ? 'shadow-none' : 'shadow-slate-200/50'} border`}
+                  className={`bg-card border border-border rounded-[18px] p-4 shadow-lg  border`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -1261,8 +1320,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         <Receipt size={20} className={transaction.type === 'expense' ? 'text-red-500' : 'text-green-500'} />
                       </div>
                       <div>
-                        <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{transaction.description}</p>
-                        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>{transaction.date}</p>
+                        <p className={`font-semibold text-foreground`}>{transaction.description}</p>
+                        <p className={`text-xs text-muted-foreground`}>{transaction.date}</p>
                       </div>
                     </div>
                     <p className={`font-bold ${transaction.type === 'expense' ? 'text-red-500' : 'text-green-500'}`}>
@@ -1301,29 +1360,29 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
             <motion.div
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', damping: 25 }}
-              className={`fixed bottom-0 left-0 right-0 z-50 ${isDark ? 'bg-slate-800' : 'bg-white'} rounded-t-3xl p-6 max-w-[430px] mx-auto`}
+              className={`fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-3xl p-6 max-w-[430px] mx-auto`}
             >
-              <div className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto mb-6" />
+              <div className="w-12 h-1.5 bg-muted-foreground/40 rounded-full mx-auto mb-6" />
               <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 rounded-[14px] bg-gradient-to-br from-violet-600 to-purple-600 flex items-center justify-center shadow-lg">
-                  <Link2 size={24} className="text-white" />
+                <div className="w-12 h-12 rounded-[14px] bg-primary/20 flex items-center justify-center">
+                  <Link2 size={24} className="text-primary" />
                 </div>
                 <div>
-                  <h3 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Invite Members</h3>
-                  <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Share this link to join {baseGroup.name}</p>
+                  <h3 className={`text-lg font-bold text-foreground`}>Invite Members</h3>
+                  <p className={`text-sm text-muted-foreground`}>Share this link to join {baseGroup.name}</p>
                 </div>
               </div>
 
               {inviteLink ? (
                 <>
-                  <div className={`${isDark ? 'bg-slate-700' : 'bg-slate-100'} rounded-xl p-4 mb-4`}>
-                    <p className={`text-sm font-mono break-all ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  <div className={`bg-secondary rounded-xl p-4 mb-4`}>
+                    <p className={`text-sm font-mono break-all text-foreground`}>
                       {inviteLink}
                     </p>
                   </div>
                   <button
                     onClick={handleCopyInviteLink}
-                    className="w-full bg-gradient-to-r from-violet-600 to-purple-600 text-white py-4 rounded-2xl font-bold shadow-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-2 mb-3"
+                    className="w-full bg-primary text-primary-foreground py-4 rounded-2xl font-bold active:scale-[0.98] transition-transform flex items-center justify-center gap-2 mb-3"
                   >
                     {linkCopied ? <Check size={20} /> : <Copy size={20} />}
                     {linkCopied ? 'Copied!' : 'Copy Link'}
@@ -1336,13 +1395,13 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         handleCopyInviteLink();
                       }
                     }}
-                    className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700'} py-4 rounded-2xl font-semibold active:scale-[0.98] transition-transform`}
+                    className={`w-full bg-secondary text-foreground py-4 rounded-2xl font-semibold active:scale-[0.98] transition-transform`}
                   >
                     Share Link
                   </button>
                 </>
               ) : (
-                <p className={`text-center py-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                <p className={`text-center py-4 text-muted-foreground`}>
                   Loading invite link...
                 </p>
               )}
@@ -1356,15 +1415,15 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         <>
           <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowDeleteModal(false)} />
           <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm">
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+            <div className={`bg-card rounded-2xl p-6 shadow-2xl`}>
               <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
                 <Trash2 size={24} className="text-red-500" />
               </div>
-              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>Delete {baseGroup.name}?</h3>
-              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>This action cannot be undone.</p>
+              <h3 className={`text-xl font-bold text-center mb-2 text-foreground`}>Delete {baseGroup.name}?</h3>
+              <p className={`text-center text-muted-foreground mb-6`}>This action cannot be undone.</p>
               <div className="space-y-2">
                 <button onClick={handleDeleteGroup} className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform">Yes, Delete Group</button>
-                <button onClick={() => setShowDeleteModal(false)} className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
+                <button onClick={() => setShowDeleteModal(false)} className={`w-full bg-secondary text-foreground py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
               </div>
             </div>
           </motion.div>
@@ -1376,15 +1435,15 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         <>
           <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowLeaveModal(false)} />
           <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm">
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+            <div className={`bg-card rounded-2xl p-6 shadow-2xl`}>
               <div className="w-12 h-12 rounded-full bg-orange-100 flex items-center justify-center mx-auto mb-4">
                 <LogOut size={24} className="text-orange-500" />
               </div>
-              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>Leave {baseGroup.name}?</h3>
-              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>You'll lose access to this group.</p>
+              <h3 className={`text-xl font-bold text-center mb-2 text-foreground`}>Leave {baseGroup.name}?</h3>
+              <p className={`text-center text-muted-foreground mb-6`}>You'll lose access to this group.</p>
               <div className="space-y-2">
                 <button onClick={handleLeaveGroup} className="w-full bg-orange-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform">Yes, Leave Group</button>
-                <button onClick={() => setShowLeaveModal(false)} className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
+                <button onClick={() => setShowLeaveModal(false)} className={`w-full bg-secondary text-foreground py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
               </div>
             </div>
           </motion.div>
@@ -1396,15 +1455,15 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         <>
           <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setShowRemoveMemberModal(false)} />
           <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[90%] max-w-sm">
-            <div className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 shadow-2xl`}>
+            <div className={`bg-card rounded-2xl p-6 shadow-2xl`}>
               <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
                 <UserMinus size={24} className="text-red-500" />
               </div>
-              <h3 className={`text-xl font-bold text-center mb-2 ${isDark ? 'text-white' : 'text-slate-800'}`}>Remove {selectedMember.name}?</h3>
-              <p className={`text-center ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>They'll be removed from the group.</p>
+              <h3 className={`text-xl font-bold text-center mb-2 text-foreground`}>Remove {selectedMember.name}?</h3>
+              <p className={`text-center text-muted-foreground mb-6`}>They'll be removed from the group.</p>
               <div className="space-y-2">
                 <button onClick={confirmRemoveMember} className="w-full bg-red-500 text-white py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform">Yes, Remove Member</button>
-                <button onClick={() => setShowRemoveMemberModal(false)} className={`w-full ${isDark ? 'bg-slate-700 text-white' : 'bg-gray-200 text-slate-800'} py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
+                <button onClick={() => setShowRemoveMemberModal(false)} className={`w-full bg-secondary text-foreground py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform`}>Cancel</button>
               </div>
             </div>
           </motion.div>

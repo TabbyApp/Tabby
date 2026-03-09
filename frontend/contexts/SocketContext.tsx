@@ -10,6 +10,8 @@ type SocketContextValue = {
   /** Timestamp when groups:changed was last emitted (e.g. someone joined/left); group detail should refetch when this changes */
   groupsChangedAt: number;
   activityInvalidatedAt: number;
+  /** When receipt claims change, { receiptId, at } so item selection page can refetch that receipt */
+  lastReceiptClaimsUpdated: { receiptId: string; groupId: string; at: number } | null;
 };
 
 const SocketContext = createContext<SocketContextValue | null>(null);
@@ -37,6 +39,7 @@ export function SocketProvider({
   const [lastGroupUpdatedAt, setLastGroupUpdatedAt] = useState(0);
   const [groupsChangedAt, setGroupsChangedAt] = useState(0);
   const [activityInvalidatedAt, setActivityInvalidatedAt] = useState(0);
+  const [lastReceiptClaimsUpdated, setLastReceiptClaimsUpdated] = useState<{ receiptId: string; groupId: string; at: number } | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const callbacksRef = useRef({ onGroupsChanged, onGroupUpdated, onActivityChanged, onRemovedFromGroup, onGroupDeleted });
   callbacksRef.current = { onGroupsChanged, onGroupUpdated, onActivityChanged, onRemovedFromGroup, onGroupDeleted };
@@ -83,6 +86,12 @@ export function SocketProvider({
       if (payload?.groupId) callbacksRef.current.onGroupDeleted?.(payload.groupId);
     });
 
+    socket.on('receipt:claims-updated', (payload: { receiptId?: string; groupId?: string }) => {
+      if (payload?.receiptId && payload?.groupId) {
+        setLastReceiptClaimsUpdated({ receiptId: payload.receiptId, groupId: payload.groupId, at: Date.now() });
+      }
+    });
+
     return () => {
       socket.close();
       socketRef.current = null;
@@ -90,7 +99,7 @@ export function SocketProvider({
   }, [enabled]);
 
   return (
-    <SocketContext.Provider value={{ lastGroupUpdatedId, lastGroupUpdatedAt, groupsChangedAt, activityInvalidatedAt }}>
+    <SocketContext.Provider value={{ lastGroupUpdatedId, lastGroupUpdatedAt, groupsChangedAt, activityInvalidatedAt, lastReceiptClaimsUpdated }}>
       {children}
     </SocketContext.Provider>
   );
@@ -98,6 +107,6 @@ export function SocketProvider({
 
 export function useSocket(): SocketContextValue {
   const ctx = useContext(SocketContext);
-  if (!ctx) return { lastGroupUpdatedId: null, lastGroupUpdatedAt: 0, groupsChangedAt: 0, activityInvalidatedAt: 0 };
+  if (!ctx) return { lastGroupUpdatedId: null, lastGroupUpdatedAt: 0, groupsChangedAt: 0, activityInvalidatedAt: 0, lastReceiptClaimsUpdated: null };
   return ctx;
 }

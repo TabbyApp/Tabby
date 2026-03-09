@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { motion } from 'motion/react';
-import { TabbyCatLogo } from './TabbyCatLogo';
+import { TabbyLogo } from './TabbyLogo';
 
 interface SplashScreenProps {
   onComplete: () => void;
@@ -17,52 +17,34 @@ export function SplashScreen({ onComplete, loadingMessage }: SplashScreenProps) 
   }, [onComplete]);
 
   return (
-    <div className="h-[calc(100vh-48px-24px)] flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-slate-100">
-      <div className="relative w-full">
-        {/* Logo Animation - starts center, moves to top third */}
+    <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="relative w-full z-10">
         <motion.div
-          initial={{ y: 0, scale: 1 }}
-          animate={{ y: -180, scale: 0.85 }}
-          transition={{ 
-            delay: 0.3,
-            duration: 0.5,
-            ease: [0.4, 0, 0.2, 1]
-          }}
-          className="flex justify-center"
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          className="flex justify-center mb-6"
         >
-          <TabbyCatLogo />
+          <TabbyLogo size={80} />
         </motion.div>
 
-        {/* Text Animations */}
-        <div className="absolute top-[calc(50%+100px)] left-0 right-0">
-          {/* Tabby Title */}
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ 
-              delay: 0.8,
-              duration: 0.4,
-              ease: [0.4, 0, 0.2, 1]
-            }}
-            className="text-5xl font-bold text-center text-slate-800 mb-2"
-          >
-            Tabby
-          </motion.h1>
+        <motion.h1
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          className="text-5xl font-bold text-center text-foreground mb-3"
+        >
+          Tabby
+        </motion.h1>
 
-          {/* Subtitle */}
-          <motion.p
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ 
-              delay: 1.0,
-              duration: 0.4,
-              ease: [0.4, 0, 0.2, 1]
-            }}
-            className="text-lg text-center text-slate-600"
-          >
-            {loadingMessage ?? 'Awkwardness Ends Here'}
-          </motion.p>
-        </div>
+        <motion.p
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+          className="text-base text-center text-muted-foreground font-medium"
+        >
+          {loadingMessage ?? 'Split bills. Track balances. Settle cleanly.'}
+        </motion.p>
       </div>
     </div>
   );

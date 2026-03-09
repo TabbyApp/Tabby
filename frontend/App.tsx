@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { SplashScreen } from './components/SplashScreen';
 import { LoginSignup } from './components/LoginSignup';
@@ -81,11 +81,25 @@ export default function App() {
     subtotal?: number;
   }>({ hasSelectedItems: false, yourItemsTotal: 0 });
   
-  // Real groups from backend
+  // Real groups from backend (single source of truth; active/recent derived below for list UIs and socket-driven updates)
   const [groups, setGroups] = useState<AppGroup[]>([]);
-  const [activeGroups, setActiveGroups] = useState<AppGroup[]>([]);
-  const [recentGroups, setRecentGroups] = useState<AppGroup[]>([]);
-  
+
+  const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+  const activeGroups = useMemo(() => {
+    return groups.filter((g) => {
+      const ls = g.lastSettledAt;
+      if (!ls) return true;
+      return Date.now() - new Date(ls).getTime() < FIFTEEN_MIN_MS;
+    });
+  }, [groups]);
+  const recentGroups = useMemo(() => {
+    return groups.filter((g) => {
+      const ls = g.lastSettledAt;
+      if (!ls) return false;
+      return Date.now() - new Date(ls).getTime() >= FIFTEEN_MIN_MS;
+    });
+  }, [groups]);
+
   // Preloaded virtual card info for LandingPage
   const [cardInfo, setCardInfo] = useState<{ lastFour: string; balance: number; groupId?: string } | null>(null);
 
@@ -139,7 +153,7 @@ export default function App() {
     }
   }, [user, refreshBootstrap]);
 
-  // Use bootstrap data (user + groups + virtualCards) - no extra fetch after login/refresh
+  // Use bootstrap data (user + groups + virtualCards). loadGroups (used by socket handlers) triggers refreshBootstrap → this effect runs → setGroups → activeGroups/recentGroups recompute.
   useEffect(() => {
     if (authLoading) return;
     if (!user) {
@@ -148,7 +162,7 @@ export default function App() {
       setInitialDataLoaded(true);
       return;
     }
-    const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+    const fifteenMinMs = 15 * 60 * 1000;
     const mapped: AppGroup[] = bootstrapGroups.map((g, i) => ({
       id: g.id,
       name: g.name,
@@ -160,21 +174,13 @@ export default function App() {
       supportCode: (g as { supportCode?: string | null }).supportCode ?? null
     }));
     setGroups(mapped);
-    // Split active vs recent: settled > 15 min ago → recent
-    const activeGroups = mapped.filter((g) => {
+    const activeList = mapped.filter((g) => {
       const ls = g.lastSettledAt;
       if (!ls) return true;
-      return Date.now() - new Date(ls).getTime() < FIFTEEN_MIN_MS;
+      return Date.now() - new Date(ls).getTime() < fifteenMinMs;
     });
-    const recentGroupsList = mapped.filter((g) => {
-      const ls = g.lastSettledAt;
-      if (!ls) return false;
-      return Date.now() - new Date(ls).getTime() >= FIFTEEN_MIN_MS;
-    });
-    setActiveGroups(activeGroups);
-    setRecentGroups(recentGroupsList);
     if (bootstrapCards.length > 0) {
-      const firstActive = bootstrapCards.find(c => activeGroups.some(g => g.id === c.groupId)) ?? bootstrapCards[0];
+      const firstActive = bootstrapCards.find(c => activeList.some(g => g.id === c.groupId)) ?? bootstrapCards[0];
       setCardInfo({
         lastFour: firstActive.cardLastFour ?? '0000',
         balance: firstActive.groupTotal ?? 0,
@@ -214,8 +220,21 @@ export default function App() {
     } catch { /* silent */ }
   };
 
-  const theme = themePreference === 'system' ? 'light' : themePreference;
-  const isDark = theme === 'dark';
+  const [resolvedDark, setResolvedDark] = useState(false);
+  useEffect(() => {
+    if (themePreference === 'dark') {
+      setResolvedDark(true);
+    } else if (themePreference === 'light') {
+      setResolvedDark(false);
+    } else {
+      setResolvedDark(typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+  }, [themePreference]);
+  useEffect(() => {
+    if (resolvedDark) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+  }, [resolvedDark]);
+  const theme = resolvedDark ? 'dark' : 'light';
 
   const handleRemovedFromGroup = useCallback((groupId: string) => {
     loadGroups();
@@ -236,9 +255,18 @@ export default function App() {
     setPageHistory(prev => [...prev, currentPage]);
     setCurrentPage(page);
     if (groupId !== undefined) {
+      const isSwitchingToDifferentGroup = page === 'groupDetail' && selectedGroupId !== null && selectedGroupId !== groupId;
       setSelectedGroupId(groupId);
       if (page === 'receiptScan') {
         setProcessingGroupId(groupId);
+      }
+      // Clear receipt-related state only when opening a *different* group (so returning from item selection keeps summary)
+      if (page === 'groupDetail' && isSwitchingToDifferentGroup) {
+        setReceiptData(null);
+        setItemSplitData({ hasSelectedItems: false, yourItemsTotal: 0 });
+        setLastReceiptId(null);
+        setProcessingGroupId(null);
+        setCurrentTransactionId(null);
       }
     } else if (page === 'cardDetails' && cardInfo?.groupId) {
       setSelectedGroupId(cardInfo.groupId);
@@ -295,8 +323,8 @@ export default function App() {
   }, [isAuthenticated, pendingInviteToken, currentPage, showSplash]);
 
   return (
-    <div className={`min-h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-black'}`}>
-      <div className={`mx-auto max-w-[430px] h-screen ${theme === 'dark' ? 'bg-slate-900' : 'bg-[#F2F2F7]'} relative overflow-hidden pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]`}>
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto max-w-[430px] min-h-screen bg-background relative overflow-hidden pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
         {showSplash ? (
           <SplashScreen
             onComplete={() => setSplashAnimDone(true)}
@@ -361,7 +389,7 @@ export default function App() {
                   onNavigate={handleNavigate}
                   theme={theme}
                   inviteCode={pendingInviteToken ?? undefined}
-                  onAccepted={() => { clearPendingInviteToken(); loadGroups(); }}
+                  onAccepted={async () => { clearPendingInviteToken(); await loadGroups(); }}
                 />
               )}
               {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
@@ -375,26 +403,26 @@ export default function App() {
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 max-w-sm w-full shadow-xl`}
+              className="bg-card border border-border rounded-2xl p-6 max-w-sm w-full shadow-xl"
             >
-              <p className={`text-center text-lg font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <p className="text-center text-lg font-semibold text-foreground">
                 {groupKickedReason === 'removed'
                   ? "You've been removed from the group."
                   : 'This group was deleted.'}
               </p>
-              <p className={`text-center text-sm mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              <p className="text-center text-sm mt-2 text-muted-foreground">
                 You've been taken back to home.
               </p>
               <button
                 onClick={() => setGroupKickedReason(null)}
-                className={`w-full mt-6 py-3 rounded-xl font-semibold ${isDark ? 'bg-slate-600 text-white' : 'bg-slate-900 text-white'}`}
+                className="w-full mt-6 py-3 rounded-xl font-semibold bg-primary text-primary-foreground"
               >
                 OK
               </button>
             </motion.div>
           </div>
         )}
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-black rounded-full opacity-40" />
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 w-36 h-1 bg-foreground/40 rounded-full" />
       </div>
     </div>
   );

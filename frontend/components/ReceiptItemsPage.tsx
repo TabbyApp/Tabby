@@ -34,9 +34,10 @@ interface Member {
 }
 
 const MEMBER_AVATARS = ['👤', '👩', '👨', '👧', '🧑', '👦', '👩‍🦰', '🧔'];
+/** Colors for "who claimed" dots on item cards (reference design) */
+const MEMBER_DOT_COLORS = ['#22C55E', '#3B82F6', '#A855F7', '#F97316', '#EC4899', '#14B8A6'];
 
 export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSplitData, receiptId, groupId, onSelectionConfirmed }: ReceiptItemsPageProps) {
-  const isDark = theme === 'dark';
   const { user } = useAuth();
   
   const [members, setMembers] = useState<Member[]>([
@@ -117,7 +118,11 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     }).finally(() => setLoading(false));
   }, [receiptId, applyReceiptData]);
 
-  const { lastGroupUpdatedId, lastGroupUpdatedAt } = useSocket();
+  const { lastGroupUpdatedId, lastGroupUpdatedAt, lastReceiptClaimsUpdated } = useSocket();
+  useEffect(() => {
+    if (!receiptId || !lastReceiptClaimsUpdated || lastReceiptClaimsUpdated.receiptId !== receiptId) return;
+    refetchReceipt();
+  }, [receiptId, lastReceiptClaimsUpdated?.at, refetchReceipt]);
   useEffect(() => {
     if (!receiptId || !groupId || lastGroupUpdatedId !== groupId || lastGroupUpdatedAt === 0) return;
     api.receipts.get(receiptId).then((r) => {
@@ -193,12 +198,22 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
   const calculateMemberTotal = (memberId: number) => {
     return items.reduce((sum, item) => {
       if (item.selectedBy.includes(memberId)) {
-        // Split the cost among all people who selected this item
         return sum + (item.price / item.selectedBy.length);
       }
       return sum;
     }, 0);
   };
+
+  // Tax logic: tax = receipt total − items subtotal; each person's share of tax is proportional to their items
+  const itemsSubtotal = items.reduce((s, i) => s + i.price, 0);
+  const tax =
+    receiptTotal != null && receiptTotal >= itemsSubtotal && itemsSubtotal > 0
+      ? receiptTotal - itemsSubtotal
+      : 0;
+  const taxRatio = itemsSubtotal > 0 ? tax / itemsSubtotal : 0;
+  const getMemberTaxShare = (memberId: number) => calculateMemberTotal(memberId) * taxRatio;
+  const getMemberTotalWithTax = (memberId: number) =>
+    calculateMemberTotal(memberId) + getMemberTaxShare(memberId);
 
   const allItemsSelected = items.every(item => item.selectedBy.length > 0);
 
@@ -344,125 +359,134 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     };
 
     return (
-      <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
-        <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}>
-          <div className="flex items-center gap-3 mb-2">
+      <div className="min-h-screen flex flex-col bg-background">
+        <div className="bg-card border-border border-b px-5 py-4">
+          <div className="flex items-center gap-3 mb-3">
             <button
               onClick={() => onNavigate('receiptScan')}
-              className={`w-9 h-9 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center active:scale-95 transition-transform`}
+              className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center active:scale-95 transition-transform"
             >
-              <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-slate-800'} strokeWidth={2.5} />
+              <ChevronLeft size={20} className="text-foreground" strokeWidth={2.5} />
             </button>
-            <h1 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Review Receipt</h1>
+            <h1 className="text-xl font-bold text-foreground">Review Receipt</h1>
           </div>
-          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${reviewValidation?.isValid ? (isDark ? 'bg-green-900/30' : 'bg-green-50') : (isDark ? 'bg-amber-900/30' : 'bg-amber-50')}`}>
+          <div className="flex justify-center mb-3">
+            <div className="inline-flex items-center gap-2 rounded-full bg-success/20 border border-success/40 px-4 py-2">
+              <span className="w-2 h-2 rounded-full bg-success shrink-0" />
+              <span className="text-sm font-medium text-success">Scanned Receipt</span>
+            </div>
+          </div>
+          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${reviewValidation?.isValid ? 'bg-success/10' : 'bg-destructive/10'}`}>
             {reviewValidation?.isValid ? (
-              <CheckCircle2 size={20} className="text-green-600 flex-shrink-0" />
+              <CheckCircle2 size={20} className="text-success flex-shrink-0" />
             ) : (
-              <AlertCircle size={20} className="text-amber-600 flex-shrink-0" />
+              <AlertCircle size={20} className="text-destructive flex-shrink-0" />
             )}
-            <span className={`text-sm font-medium ${reviewValidation?.isValid ? 'text-green-700' : 'text-amber-700'}`}>
+            <span className={`text-sm font-medium ${reviewValidation?.isValid ? 'text-success' : 'text-destructive'}`}>
               {reviewValidation?.isValid ? 'Reconciles ✓' : "Doesn't reconcile"}
             </span>
             {!reviewValidation?.isValid && (
-              <span className={`text-xs ${isDark ? 'text-amber-300' : 'text-amber-600'}`}>
+              <span className="text-xs text-destructive">
                 {reviewValidation?.issues.join(' ')}
               </span>
             )}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
           {reviewReceipt.merchantName != null && (
             <div>
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Merchant</label>
+              <label className={`block text-xs font-medium mb-1 text-muted-foreground`}>Merchant</label>
               <input
                 type="text"
                 value={reviewReceipt.merchantName}
                 onChange={(e) => setReviewReceipt((r) => (r ? { ...r, merchantName: e.target.value } : null))}
-                className={`w-full px-3 py-2 rounded-lg border ${isLowConfidence('merchantName') ? 'border-amber-500' : ''} ${isDark ? 'bg-slate-800 text-white border-slate-600' : 'bg-white text-slate-800 border-slate-200'}`}
+                className={`w-full px-3 py-2 rounded-lg border ${isLowConfidence('merchantName') ? 'border-amber-500' : ''} bg-card text-foreground border-border`}
               />
             </div>
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Subtotal</label>
+              <label className={`block text-xs font-medium mb-1 text-muted-foreground`}>Subtotal</label>
               <input
                 type="number"
                 step="0.01"
                 value={reviewReceipt.totals.subtotal ?? ''}
                 onChange={(e) => updateTotals({ subtotal: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
-                className={`w-full px-3 py-2 rounded-lg border ${suggestedSet.has('subtotal') ? 'border-amber-500' : ''} ${isDark ? 'bg-slate-800 text-white border-slate-600' : 'bg-white text-slate-800 border-slate-200'}`}
+                className={`w-full px-3 py-2 rounded-lg border ${suggestedSet.has('subtotal') ? 'border-amber-500' : ''} bg-card text-foreground border-border`}
               />
             </div>
             <div>
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Tax</label>
+              <label className={`block text-xs font-medium mb-1 text-muted-foreground`}>Tax</label>
               <input
                 type="number"
                 step="0.01"
                 value={reviewReceipt.totals.tax ?? ''}
                 onChange={(e) => updateTotals({ tax: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
-                className={`w-full px-3 py-2 rounded-lg border ${suggestedSet.has('tax') ? 'border-amber-500' : ''} ${isDark ? 'bg-slate-800 text-white border-slate-600' : 'bg-white text-slate-800 border-slate-200'}`}
+                className={`w-full px-3 py-2 rounded-lg border ${suggestedSet.has('tax') ? 'border-amber-500' : ''} bg-card text-foreground border-border`}
               />
             </div>
             <div>
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Tip</label>
+              <label className={`block text-xs font-medium mb-1 text-muted-foreground`}>Tip</label>
               <input
                 type="number"
                 step="0.01"
                 value={reviewReceipt.totals.tip ?? ''}
                 onChange={(e) => updateTotals({ tip: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
-                className={`w-full px-3 py-2 rounded-lg border ${suggestedSet.has('tip') ? 'border-amber-500' : ''} ${isDark ? 'bg-slate-800 text-white border-slate-600' : 'bg-white text-slate-800 border-slate-200'}`}
+                className={`w-full px-3 py-2 rounded-lg border ${suggestedSet.has('tip') ? 'border-amber-500' : ''} bg-card text-foreground border-border`}
               />
             </div>
             <div>
-              <label className={`block text-xs font-medium mb-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Total</label>
+              <label className={`block text-xs font-medium mb-1 text-muted-foreground`}>Total</label>
               <input
                 type="number"
                 step="0.01"
                 value={reviewReceipt.totals.total ?? ''}
                 onChange={(e) => updateTotals({ total: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
-                className={`w-full px-3 py-2 rounded-lg border ${suggestedSet.has('total') ? 'border-amber-500' : ''} ${isDark ? 'bg-slate-800 text-white border-slate-600' : 'bg-white text-slate-800 border-slate-200'}`}
+                className={`w-full px-3 py-2 rounded-lg border ${suggestedSet.has('total') ? 'border-amber-500' : ''} bg-card text-foreground border-border`}
               />
             </div>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className={`text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Line items</label>
+            <div className="flex items-center justify-between mb-3">
+              <label className="text-sm font-medium text-foreground">Line items</label>
               <button
                 type="button"
                 onClick={addLineItem}
-                className={`text-sm font-medium ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}
+                className="text-sm font-medium text-success"
               >
                 + Add item
               </button>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {reviewReceipt.lineItems.map((item, idx) => (
                 <div
                   key={idx}
-                  className={`flex gap-2 items-center rounded-lg p-2 ${isDark ? 'bg-slate-800' : 'bg-white'} border ${suggestedSet.has(`lineItems[${idx}].price`) ? 'border-amber-500' : 'border-transparent'}`}
+                  className={`flex items-center gap-3 rounded-2xl p-4 bg-card border ${suggestedSet.has(`lineItems[${idx}].price`) ? 'border-amber-500' : 'border-border'}`}
                 >
                   <input
                     type="text"
-                    placeholder="Name"
+                    placeholder="Item name"
                     value={item.name}
                     onChange={(e) => updateLineItem(idx, { name: e.target.value })}
-                    className={`flex-1 min-w-0 px-3 py-2 rounded border ${isDark ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-50 text-slate-800 border-slate-200'}`}
+                    className="flex-1 min-w-0 bg-transparent text-foreground font-medium placeholder:text-muted-foreground focus:outline-none"
                   />
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="Price"
-                    value={item.price || ''}
-                    onChange={(e) => updateLineItem(idx, { price: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
-                    className={`w-20 px-3 py-2 rounded border ${isDark ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-50 text-slate-800 border-slate-200'}`}
-                  />
+                  <div className="flex items-center gap-0">
+                    <span className="text-success font-semibold">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={item.price || ''}
+                      onChange={(e) => updateLineItem(idx, { price: e.target.value === '' ? 0 : parseFloat(e.target.value) })}
+                      className="w-20 text-right bg-transparent text-success font-semibold tabular-nums placeholder:text-muted-foreground focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => removeLineItem(idx)}
-                    className={`p-2 rounded ${isDark ? 'hover:bg-slate-700 text-slate-400' : 'hover:bg-slate-100 text-slate-500'}`}
+                    className="p-1.5 rounded-lg hover:bg-secondary text-muted-foreground"
                     aria-label="Remove item"
                   >
                     ×
@@ -470,16 +494,24 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
                 </div>
               ))}
             </div>
+            {reviewReceipt.lineItems.length > 0 && (
+              <div className="mt-4 rounded-2xl bg-success/20 border border-success/30 p-4 flex items-center justify-between">
+                <span className="text-sm font-medium text-foreground">Subtotal</span>
+                <span className="text-lg font-bold text-foreground tabular-nums">
+                  ${reviewReceipt.lineItems.reduce((s, i) => s + (Number(i.price) || 0), 0).toFixed(2)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-t px-5 py-4 flex gap-2`}>
+        <div className={`bg-card border-border border-t px-5 py-4 flex gap-2`}>
           {receiptStatus === 'FAILED' && (
             <button
               type="button"
               onClick={handleRetry}
               disabled={retrying}
-              className={`flex-1 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'}`}
+              className={`flex-1 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 bg-secondary text-foreground`}
             >
               <RotateCcw size={18} />
               {retrying ? 'Retrying...' : 'Retry processing'}
@@ -489,7 +521,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
             type="button"
             onClick={handleConfirmReview}
             disabled={!reviewValidation?.isValid || confirmingReview}
-            className={`flex-1 py-4 rounded-xl font-semibold ${reviewValidation?.isValid && !confirmingReview ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white' : isDark ? 'bg-slate-700 text-slate-500 cursor-not-allowed' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}
+            className={`flex-1 py-4 rounded-xl font-semibold ${reviewValidation?.isValid && !confirmingReview ? 'bg-primary text-primary-foreground' : 'bg-secondary text-muted-foreground cursor-not-allowed'}`}
           >
             {confirmingReview ? 'Saving...' : 'Confirm receipt'}
           </button>
@@ -499,38 +531,46 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
   }
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
-      {/* Header */}
-      <motion.div 
+    <div className="min-h-screen flex flex-col bg-background">
+      <motion.div
         initial={{ opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-b px-5 py-4`}
+        className="bg-card border-border border-b px-5 py-4"
       >
-        <div className="flex items-center gap-3 mb-4">
-          <button 
+        <div className="flex items-center gap-3 mb-3">
+          <button
             onClick={() => onNavigate('groupDetail', groupId ?? undefined)}
-            className={`w-9 h-9 rounded-full ${isDark ? 'bg-slate-700' : 'bg-gray-100'} flex items-center justify-center active:scale-95 transition-transform`}
+            className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center active:scale-95 transition-transform"
           >
-            <ChevronLeft size={20} className={isDark ? 'text-white' : 'text-slate-800'} strokeWidth={2.5} />
+            <ChevronLeft size={20} className="text-foreground" strokeWidth={2.5} />
           </button>
           <div className="flex-1">
-            <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>Split Items</h1>
-            <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+            <h1 className="text-2xl font-bold text-foreground">Split Items</h1>
+            <p className="text-sm text-muted-foreground">
               Receipt • ${calculateTotal().toFixed(2)}
             </p>
           </div>
         </div>
 
+        {!waitingForHostConfirm && canSelectItems && (
+          <div className="flex justify-center mb-3">
+            <div className="inline-flex items-center gap-2 rounded-full bg-success/20 border border-success/40 px-4 py-2">
+              <span className="w-2 h-2 rounded-full bg-success shrink-0" />
+              <span className="text-sm font-medium text-success">Tap items to claim</span>
+            </div>
+          </div>
+        )}
+
         {waitingForHostConfirm && (
-          <div className={`mb-4 rounded-xl p-4 ${isDark ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
-            <p className={`text-sm font-medium ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>
+          <div className="mb-4 rounded-xl p-4 bg-destructive/10 border border-border">
+            <p className="text-sm font-medium text-destructive">
               Waiting for host to confirm receipt. You can select your items once they confirm.
             </p>
           </div>
         )}
         {receiptStatus === 'FAILED' && realReceiptId && (
-          <div className={`mb-4 rounded-xl p-4 flex items-center justify-between ${isDark ? 'bg-amber-900/30 border border-amber-700' : 'bg-amber-50 border border-amber-200'}`}>
-            <p className={`text-sm font-medium ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>Processing failed. You can retry or add items manually.</p>
+          <div className="mb-4 rounded-xl p-4 flex items-center justify-between bg-destructive/10 border border-border">
+            <p className="text-sm font-medium text-destructive">Processing failed. You can retry or add items manually.</p>
             <button
               type="button"
               onClick={() => {
@@ -549,7 +589,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
                 }).catch(() => {}).finally(() => setRetrying(false));
               }}
               disabled={retrying}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium ${isDark ? 'bg-amber-700 text-white' : 'bg-amber-600 text-white'}`}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-destructive text-destructive-foreground"
             >
               <RotateCcw size={18} />
               {retrying ? 'Retrying...' : 'Retry'}
@@ -557,18 +597,15 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
           </div>
         )}
 
-        {/* Member Selection */}
         <div className="flex gap-2 overflow-x-auto pb-2">
-          {members.map((member) => (
+          {members.map((member, mi) => (
             <button
               key={member.id}
               onClick={() => setSelectedMember(member.id)}
               className={`flex-shrink-0 px-4 py-2 rounded-full font-medium transition-all ${
                 selectedMember === member.id
-                  ? 'bg-gradient-to-r from-slate-600 to-blue-500 text-white shadow-lg'
-                  : isDark
-                    ? 'bg-slate-700 text-slate-300'
-                    : 'bg-gray-200 text-slate-600'
+                  ? 'bg-success/20 text-success border border-success/40'
+                  : 'bg-secondary text-muted-foreground'
               }`}
             >
               <span className="mr-2">{member.avatar}</span>
@@ -578,108 +615,101 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
         </div>
       </motion.div>
 
-      {/* Items List */}
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="flex-1 overflow-y-auto px-5 py-5">
         {loading ? (
-          <p className={`text-center mt-8 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Loading receipt items...</p>
+          <p className="text-center mt-8 text-muted-foreground">Loading receipt items...</p>
         ) : items.length === 0 ? (
-          <p className={`text-center mt-8 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>No items. Add items manually below.</p>
+          <p className="text-center mt-8 text-muted-foreground">No items. Add items manually below.</p>
         ) : null}
-        <div className="space-y-3">{items.map((item, index) => {
-          const isSelected = item.selectedBy.includes(selectedMember);
-          const splitCount = item.selectedBy.length;
-          const splitPrice = splitCount > 0 ? item.price / splitCount : item.price;
+        <div className="space-y-4">
+          {items.map((item, index) => {
+            const isSelected = item.selectedBy.includes(selectedMember);
+            const splitCount = item.selectedBy.length;
+            const splitPrice = splitCount > 0 ? item.price / splitCount : item.price;
+            const firstClaimerId = item.selectedBy[0];
+            const firstClaimer = firstClaimerId != null ? members.find(m => m.id === firstClaimerId) : null;
+            const dotColor = firstClaimerId != null
+              ? MEMBER_DOT_COLORS[members.findIndex(m => m.id === firstClaimerId) % MEMBER_DOT_COLORS.length]
+              : undefined;
+            const claimerNames = item.selectedBy
+              .map((id) => members.find((m) => m.id === id)?.name)
+              .filter((n): n is string => !!n);
+            const claimerLabel = splitCount > 0
+              ? claimerNames.length <= 3
+                ? claimerNames.join(', ')
+                : `${claimerNames.slice(0, 2).join(', ')} +${splitCount - 2}`
+              : '';
 
-          return (
-            <motion.button
-              key={item.id}
-              initial={{ x: -20, opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              transition={{ delay: index * 0.05, duration: 0.3 }}
-              onClick={() => toggleItemSelection(item.id)}
-              disabled={!canSelectItems || !isSelectedMemberMe}
-              className={`w-full ${
-                isDark ? 'bg-slate-800' : 'bg-white'
-              } rounded-xl p-4 shadow-sm transition-all ${
-                isSelected ? 'ring-2 ring-blue-500' : ''
-              } ${!canSelectItems || !isSelectedMemberMe ? 'opacity-75 cursor-default' : 'active:scale-[0.98]'}`}
-            >
-              <div className="flex items-start gap-3">
-                <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
-                  isSelected 
-                    ? 'bg-blue-500 border-blue-500' 
-                    : isDark 
-                      ? 'border-slate-600' 
-                      : 'border-gray-300'
-                }`}>
-                  {isSelected && <Check size={16} className="text-white" strokeWidth={3} />}
+            return (
+              <motion.button
+                key={item.id}
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: index * 0.05, duration: 0.3 }}
+                onClick={() => toggleItemSelection(item.id)}
+                disabled={!canSelectItems || !isSelectedMemberMe}
+                className={`w-full text-left rounded-2xl p-4 transition-all border ${
+                  isSelected ? 'bg-card border-success/50 ring-2 ring-success/30' : 'bg-card border-border'
+                } ${!canSelectItems || !isSelectedMemberMe ? 'opacity-75 cursor-default' : 'active:scale-[0.99]'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    {dotColor != null ? (
+                      <div
+                        className="w-3 h-3 rounded-full shrink-0"
+                        style={{ backgroundColor: dotColor }}
+                      />
+                    ) : (
+                      <div className="w-3 h-3 rounded-full bg-muted shrink-0" />
+                    )}
+                    <p className="font-medium text-foreground truncate">{item.name}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    {splitCount > 0 && (
+                      <>
+                        <p className="text-xs text-muted-foreground">{claimerLabel}</p>
+                        {splitCount > 1 && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {splitCount} people splitting · ${splitPrice.toFixed(2)} each
+                          </p>
+                        )}
+                      </>
+                    )}
+                    <p className="font-semibold text-success tabular-nums">${item.price.toFixed(2)}</p>
+                  </div>
                 </div>
-                <div className="flex-1 text-left">
-                  <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                    {item.name}
-                  </p>
-                  {splitCount > 0 && (
-                    <div className="flex items-center gap-2 mt-1">
-                      <div className="flex -space-x-1">
-                        {item.selectedBy.map((memberId) => {
-                          const member = members.find(m => m.id === memberId);
-                          return (
-                            <div 
-                              key={memberId}
-                              className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 border border-white flex items-center justify-center text-xs"
-                            >
-                              {member?.avatar}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                        Split {splitCount} {splitCount === 1 ? 'way' : 'ways'}
-                      </p>
-                    </div>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className={`font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                    ${item.price.toFixed(2)}
-                  </p>
-                  {splitCount > 0 && (
-                    <p className="text-xs text-blue-500 font-medium">
-                      ${splitPrice.toFixed(2)} each
-                    </p>
-                  )}
-                </div>
-              </div>
-            </motion.button>
-          );
-        })}
+                {isSelected && (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <Check size={14} className="text-success shrink-0" />
+                    <span className="text-xs font-medium text-success">Claimed by you</span>
+                  </div>
+                )}
+              </motion.button>
+            );
+          })}
         </div>
 
         {/* Manual Entry */}
         {showManualEntry && (
-          <div className="mt-4">
+          <div className="mt-8">
             <div className="flex items-center gap-3">
               <input
                 type="text"
                 value={newItemName}
                 onChange={(e) => setNewItemName(e.target.value)}
                 placeholder="Item Name"
-                className={`w-full px-4 py-2 rounded-xl ${isDark ? 'bg-slate-800 text-white' : 'bg-gray-100 text-slate-800'} border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                className="w-full px-4 py-2 rounded-xl bg-secondary text-foreground border border-border focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <input
                 type="text"
                 value={newItemPrice}
                 onChange={(e) => setNewItemPrice(e.target.value)}
                 placeholder="Price"
-                className={`w-full px-4 py-2 rounded-xl ${isDark ? 'bg-slate-800 text-white' : 'bg-gray-100 text-slate-800'} border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                className="w-full px-4 py-2 rounded-xl bg-secondary text-foreground border border-border focus:outline-none focus:ring-2 focus:ring-primary"
               />
               <button
                 onClick={addManualItem}
-                className={`px-4 py-2 rounded-xl font-semibold shadow-lg transition-all ${
-                  isDark
-                    ? 'bg-gradient-to-r from-slate-600 to-blue-500 text-white active:scale-[0.98]'
-                    : 'bg-blue-500 text-white active:scale-[0.98]'
-                }`}
+                className="px-4 py-2 rounded-xl font-semibold bg-primary text-primary-foreground active:scale-[0.98] transition-transform"
               >
                 Add
               </button>
@@ -689,41 +719,46 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
         {!showManualEntry && (
           <button
             onClick={() => setShowManualEntry(true)}
-            className={`w-full py-4 rounded-xl font-semibold shadow-lg transition-all ${
-              isDark
-                ? 'bg-gradient-to-r from-slate-600 to-blue-500 text-white active:scale-[0.98]'
-                : 'bg-blue-500 text-white active:scale-[0.98]'
-            }`}
+            className="w-full mt-8 py-3.5 rounded-xl font-medium bg-card border border-border text-foreground active:scale-[0.99] transition-transform"
           >
             Add Manual Item
           </button>
         )}
       </div>
 
-      {/* Summary Bar */}
-      <div className={`${isDark ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-200'} border-t px-5 py-4`}>
-        <div className="mb-3">
-          <div className="flex items-center justify-between mb-2">
-            <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+      <div className="bg-card border-border border-t px-5 py-4">
+        <div className="rounded-2xl bg-success/20 border border-success/30 p-4 mb-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-foreground">
               {members.find(m => m.id === selectedMember)?.name}'s Total
-            </p>
-            <p className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-              ${calculateMemberTotal(selectedMember).toFixed(2)}
-            </p>
+            </span>
+            <span className="text-xl font-bold text-foreground tabular-nums">
+              ${getMemberTotalWithTax(selectedMember).toFixed(2)}
+            </span>
           </div>
-          <p className={`text-xs ${isDark ? 'text-slate-500' : 'text-slate-500'} mb-2`}>
-            Items total: ${items.reduce((s, i) => s + i.price, 0).toFixed(2)}
-            {receiptTotal != null && receiptTotal > items.reduce((s, i) => s + i.price, 0) && (
+          {tax > 0 && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Includes ${getMemberTaxShare(selectedMember).toFixed(2)} tax (proportional)
+            </p>
+          )}
+        </div>
+        <div className="mb-3">
+          <p className="text-xs text-muted-foreground mb-2">
+            Items subtotal: ${itemsSubtotal.toFixed(2)}
+            {receiptTotal != null && tax > 0 && (
+              <span className="ml-1">• Tax: ${tax.toFixed(2)} • Receipt total: ${receiptTotal.toFixed(2)}</span>
+            )}
+            {receiptTotal != null && tax <= 0 && receiptTotal > itemsSubtotal && (
               <span className="ml-1">• Receipt total: ${receiptTotal.toFixed(2)}</span>
             )}
           </p>
           {!allItemsSelected && (
-            <p className="text-xs text-orange-500">
+            <p className="text-xs text-destructive">
               ⚠️ All items must be selected before submitting
             </p>
           )}
           {user?.id !== uploadedBy && uploadedBy && (
-            <p className={`text-xs mt-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            <p className={`text-xs mt-2 text-muted-foreground`}>
               Only the receipt uploader can confirm. Select your items; the host will complete payment.
             </p>
           )}
@@ -732,12 +767,10 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
           <button
             onClick={handleSubmitClick}
             disabled={!allItemsSelected}
-            className={`w-full py-4 rounded-xl font-semibold shadow-lg transition-all ${
+            className={`w-full py-4 rounded-xl font-semibold transition-all ${
               allItemsSelected
-                ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white active:scale-[0.98]'
-                : isDark 
-                  ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                ? 'bg-primary text-primary-foreground active:scale-[0.98]'
+                : 'bg-secondary text-muted-foreground cursor-not-allowed'
             }`}
           >
             Confirm Selections
@@ -751,45 +784,50 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
           <motion.div 
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className={`${isDark ? 'bg-slate-800' : 'bg-white'} rounded-2xl p-6 max-w-sm w-full shadow-2xl`}
+            className={`bg-card rounded-2xl p-6 max-w-sm w-full shadow-2xl`}
           >
-            <h2 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-slate-800'} mb-2`}>
+            <h2 className={`text-xl font-bold text-foreground mb-2`}>
               Confirm Item Selections?
             </h2>
-            <p className={`text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6`}>
+            <p className={`text-sm text-muted-foreground mb-6`}>
               Review each member's selections. You'll add tip and complete payment on the next screen.
             </p>
             
-            {/* Member breakdown */}
-            <div className={`${isDark ? 'bg-slate-700' : 'bg-slate-50'} rounded-xl p-4 mb-6 space-y-2`}>
+            {/* Member breakdown (items + proportional tax) */}
+            <div className="bg-secondary rounded-xl p-4 mb-6 space-y-2">
               {members.map(member => {
-                const amount = calculateMemberTotal(member.id);
-                if (amount > 0) {
-                  return (
-                    <div key={member.id} className="flex justify-between items-center">
-                      <span className={`text-sm ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                        {member.avatar} {member.name}
-                      </span>
-                      <span className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                        ${amount.toFixed(2)}
-                      </span>
-                    </div>
-                  );
-                }
-                return null;
+                const itemsOnly = calculateMemberTotal(member.id);
+                if (itemsOnly <= 0) return null;
+                const totalWithTax = getMemberTotalWithTax(member.id);
+                const taxShare = getMemberTaxShare(member.id);
+                return (
+                  <div key={member.id} className="flex justify-between items-center">
+                    <span className="text-sm text-foreground">
+                      {member.avatar} {member.name}
+                    </span>
+                    <span className="text-sm font-semibold text-foreground tabular-nums">
+                      ${totalWithTax.toFixed(2)}
+                      {taxShare > 0 && (
+                        <span className="text-xs font-normal text-muted-foreground ml-1">
+                          (incl. ${taxShare.toFixed(2)} tax)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                );
               })}
             </div>
 
             <div className="flex gap-3">
               <button
                 onClick={() => setShowConfirmation(false)}
-                className={`flex-1 py-3 rounded-xl font-semibold transition-all ${isDark ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'} active:scale-[0.98]`}
+                className={`flex-1 py-3 rounded-xl font-semibold transition-all bg-secondary text-foreground active:scale-[0.98]`}
               >
                 Cancel
               </button>
               <button
                 onClick={confirmSubmit}
-                className="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 text-white py-3 rounded-xl font-semibold shadow-lg active:scale-[0.98] transition-all"
+                className="flex-1 bg-primary text-primary-foreground py-3 rounded-xl font-semibold active:scale-[0.98] transition-transform"
               >
                 Confirm Selection
               </button>
