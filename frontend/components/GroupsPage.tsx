@@ -98,7 +98,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
                 ? `No groups matching "${searchQuery}"`
                 : activeTab === 'active'
                   ? 'Create a group to start splitting bills'
-                  : 'Recently deleted groups will appear here'}
+                  : 'Recently settled groups will appear here'}
             </p>
             {activeTab === 'active' && !searchQuery && (
               <button
@@ -115,14 +115,14 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
               {displayGroups.map((group, index) => (
                 <motion.button
                   key={group.id}
-                  onClick={() => activeTab === 'active' ? onNavigate('groupDetail', group.id) : undefined}
+                  onClick={() => onNavigate('groupDetail', group.id)}
                   initial={{ x: -20, opacity: 0 }}
                   animate={{ x: 0, opacity: 1 }}
                   transition={{ delay: index * 0.05, duration: 0.5 }}
                   className={`w-full bg-card border border-border rounded-2xl p-4 text-left ${
                     activeTab === 'active'
                       ? 'active:scale-[0.99] hover:border-border/80'
-                      : 'opacity-60 cursor-default'
+                      : 'opacity-70 active:scale-[0.99] hover:border-border/80'
                   } transition-all`}
                 >
                   <div className="flex items-center gap-3">

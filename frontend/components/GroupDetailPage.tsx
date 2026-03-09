@@ -268,7 +268,11 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const [refetchOnVisible, setRefetchOnVisible] = useState(0);
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    const onVisible = () => setRefetchOnVisible((n) => n + 1);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        setRefetchOnVisible((n) => n + 1);
+      }
+    };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
@@ -1249,7 +1253,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 </>
             </motion.div>
           ) : (
-            /* Item Split Mode (when hasReceipt) */
+            /* Item Split Mode (fallback) - item-split receipts are handled above via hasReceiptForItemSplit */
             <motion.div
               key="item"
               initial={{ opacity: 0, x: 10 }}
@@ -1257,207 +1261,32 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
               exit={{ opacity: 0, x: -10 }}
               transition={{ duration: 0.15 }}
             >
-              {hasSelectedItems ? (
-                <>
-                  {/* Selected Items Summary + Tip + Complete (show after item-split confirm even though receipt is now 'completed') */}
-                  <motion.div
-                    initial={{ y: 6, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.12 }}
-                    className={`bg-card border border-border rounded-[24px] p-5 shadow-lg  border mb-5`}
+              <motion.div
+                initial={{ y: 8, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ duration: 0.15 }}
+                className={`bg-card border border-border rounded-[24px] p-8 shadow-lg  border text-center`}
+              >
+                <div className={`w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4`}>
+                  <Receipt size={28} className="text-indigo-600" />
+                </div>
+                <h3 className={`text-lg font-bold text-foreground mb-2`}>
+                  {isCreator ? 'Upload a Receipt' : 'Waiting for Receipt'}
+                </h3>
+                <p className={`text-sm text-muted-foreground mb-6`}>
+                  {isCreator
+                    ? 'Upload your receipt to split by item.'
+                    : 'Only the group host can add a receipt.'}
+                </p>
+                {isCreator && (
+                  <button
+                    onClick={handleAddReceipt}
+                    className="w-full bg-primary text-primary-foreground py-3.5 rounded-[16px] font-bold active:scale-[0.98] transition-transform"
                   >
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-12 h-12 rounded-[14px] bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg">
-                        <Receipt size={24} className="text-white" />
-                      </div>
-                      <div className="flex-1">
-                        <p className={`font-bold text-foreground text-lg`}>Items Selected</p>
-                        <p className={`text-sm text-muted-foreground`}>Your items from receipt</p>
-                      </div>
-                      {receiptForItemSplit && isCreator && (
-                        <button
-                          onClick={() => groupId && onNavigateToReceiptItems?.(groupId, receiptForItemSplit.id)}
-                          className="text-violet-600 font-semibold text-sm"
-                        >
-                          Edit
-                        </button>
-                      )}
-                    </div>
-
-                    <div className={`bg-secondary/50 rounded-[16px] p-4 space-y-2`}>
-                      <div className="flex justify-between items-center">
-                        <span className={`text-sm text-muted-foreground`}>Your Items</span>
-                        <span className={`font-semibold text-foreground`}>${yourItemsSubtotal.toFixed(2)}</span>
-                      </div>
-                      {yourTaxShare > 0 && (
-                        <div className="flex justify-between items-center">
-                          <span className={`text-sm text-muted-foreground`}>Tax</span>
-                          <span className={`font-semibold text-foreground`}>${yourTaxShare.toFixed(2)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between items-center">
-                        <span className={`text-sm text-muted-foreground`}>Tip ({tipPercentage}%)</span>
-                        <span className={`font-semibold text-foreground`}>${tipAmount.toFixed(2)}</span>
-                      </div>
-                      <div className={`border-t border-border pt-2 mt-2`}>
-                        <div className="flex justify-between items-center">
-                          <span className={`font-bold text-foreground`}>Your Total</span>
-                          <span className={`font-bold text-lg text-foreground`}>${totalWithTip.toFixed(2)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-
-                  {/* Tip: host can change (syncs to server); members see it update in real time */}
-                  <motion.div
-                    initial={{ y: 6, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ duration: 0.12 }}
-                    className={`bg-card border border-border rounded-[24px] p-5 shadow-lg  border mb-5`}
-                  >
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="flex items-center gap-2">
-                        <DollarSign size={20} className="text-amber-500" />
-                        <h3 className={`font-bold text-foreground`}>{isCreator ? 'Add Tip' : 'Tip'}</h3>
-                      </div>
-                      <span className="text-2xl font-bold text-primary">
-                        {tipPercentage}%
-                      </span>
-                    </div>
-                    {isCreator ? (
-                      <>
-                        <div className="grid grid-cols-4 gap-2 mb-4">
-                          {[10, 15, 18, 20].map((tip) => (
-                            <button
-                              key={tip}
-                              onClick={() => {
-                                setTipPercentage(tip);
-                                if (groupId && pendingItemSplit) {
-                                  invalidateGroupCache(groupId);
-                                  api.groups.updateDraftTip(groupId, tip).catch(() => {});
-                                }
-                              }}
-                              className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
-                                tipPercentage === tip
-                                  ? 'bg-primary text-primary-foreground'
-                                  : `bg-secondary text-muted-foreground`
-                              }`}
-                            >
-                              {tip}%
-                            </button>
-                          ))}
-                        </div>
-                        <div className="relative">
-                          <input
-                            type="range" min="0" max="30" value={tipPercentage}
-                            onChange={(e) => {
-                              const v = parseInt(e.target.value);
-                              setTipPercentage(v);
-                              if (groupId && pendingItemSplit) {
-                                invalidateGroupCache(groupId);
-                                api.groups.updateDraftTip(groupId, v).catch(() => {});
-                              }
-                            }}
-                            className="w-full h-2 rounded-full appearance-none cursor-pointer"
-                            style={{
-                              background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${(tipPercentage / 30) * 100}%, var(--muted) ${(tipPercentage / 30) * 100}%, var(--muted) 100%)`
-                            }}
-                          />
-                          <div className="flex justify-between mt-2">
-                            <span className={`text-xs text-muted-foreground`}>0%</span>
-                            <span className={`text-xs text-muted-foreground`}>30%</span>
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <p className={`text-sm text-muted-foreground`}>
-                        Host is setting the tip. Your total updates above.
-                      </p>
-                    )}
-                  </motion.div>
-
-                  {isCreator && (
-                    <motion.button
-                      initial={{ y: 6, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      transition={{ duration: 0.12 }}
-                      onClick={handleCompletePayment}
-                      disabled={settlingPayment}
-                      className="w-full bg-primary text-primary-foreground py-4 rounded-[20px] font-bold active:scale-[0.98] transition-transform text-[17px] disabled:opacity-60"
-                    >
-                      {settlingPayment ? 'Processing...' : `Complete Payment • $${totalWithTip.toFixed(2)}`}
-                    </motion.button>
-                  )}
-                  {!isCreator && (
-                    <p className={`text-sm text-center py-3 text-muted-foreground`}>
-                      Only the group creator can complete payment.
-                    </p>
-                  )}
-                </>
-              ) : hasReceiptForItemSplit ? (
-                <motion.div
-                  initial={{ y: 8, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.15 }}
-                  className={`bg-card border border-border rounded-[24px] p-8 shadow-lg  border text-center`}
-                >
-                  {!receiptReadyForMemberSelection && !isCreator ? (
-                    <>
-                      <div className={`w-16 h-16 rounded-full bg-secondary flex items-center justify-center mx-auto mb-4`}>
-                        <Receipt size={28} className="text-amber-600" />
-                      </div>
-                      <h3 className={`text-lg font-bold text-foreground mb-2`}>Waiting for host to confirm receipt</h3>
-                      <p className={`text-sm text-muted-foreground`}>
-                        The host is reviewing the receipt. You can select your items once they confirm.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <div className={`w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4`}>
-                        <Receipt size={28} className="text-indigo-600" />
-                      </div>
-                      <h3 className={`text-lg font-bold text-foreground mb-2`}>Select Your Items</h3>
-                      <p className={`text-sm text-muted-foreground mb-6`}>
-                        A receipt has been uploaded. Choose what you ordered to split by item.
-                      </p>
-                      <button
-                        onClick={() => groupId && receiptForItemSplit && onNavigateToReceiptItems?.(groupId, receiptForItemSplit.id)}
-                        className="w-full bg-primary text-primary-foreground py-3.5 rounded-[16px] font-bold active:scale-[0.98] transition-transform"
-                      >
-                        Select Your Items
-                      </button>
-                      {receiptDetail && receiptDetail.items.length > 0 && (
-                        <MemberSelectionsSection receiptDetail={receiptDetail} realMembers={realMembers} user={user} />
-                      )}
-                    </>
-                  )}
-                </motion.div>
-              ) : (
-                <motion.div
-                  initial={{ y: 8, opacity: 0 }}
-                  animate={{ y: 0, opacity: 1 }}
-                  transition={{ duration: 0.15 }}
-                  className={`bg-card border border-border rounded-[24px] p-8 shadow-lg  border text-center`}
-                >
-                  <div className={`w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4`}>
-                    <Receipt size={28} className="text-indigo-600" />
-                  </div>
-                  <h3 className={`text-lg font-bold text-foreground mb-2`}>
-                    {isCreator ? 'Upload a Receipt' : 'Waiting for Receipt'}
-                  </h3>
-                  <p className={`text-sm text-muted-foreground mb-6`}>
-                    {isCreator ? 'Upload your receipt and choose what you ordered to split by item' : 'The group creator needs to upload a receipt first'}
-                  </p>
-                  {isCreator && (
-                    <button
-                      onClick={handleAddReceipt}
-                      className="w-full bg-primary text-primary-foreground py-3.5 rounded-[16px] font-bold active:scale-[0.98] transition-transform"
-                    >
-                      Scan Receipt
-                    </button>
-                  )}
-                </motion.div>
-              )}
+                    Add Receipt
+                  </button>
+                )}
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
