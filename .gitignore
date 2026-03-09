@@ -46,3 +46,6 @@ server/uploads/
 coverage/
 tmp/
 temp/
+
+### Cursor / IDE ###
+.cursor/
