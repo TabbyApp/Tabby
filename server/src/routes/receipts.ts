@@ -559,6 +559,8 @@ receiptsRouter.put('/:receiptId/items/:itemId/claims', requireAuth, async (req, 
   }
 
   const { rows: claimRows } = await query<{ user_id: string }>('SELECT user_id FROM item_claims WHERE receipt_item_id = $1', [itemId]);
+  void emitToGroup(receipt.group_id, 'group:updated', { groupId: receipt.group_id });
+  void emitToGroup(receipt.group_id, 'receipt:claims-updated', { receiptId, groupId: receipt.group_id });
   res.json({ userIds: claimRows.map((c) => c.user_id) });
 });
 

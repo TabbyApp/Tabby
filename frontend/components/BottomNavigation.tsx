@@ -9,59 +9,81 @@ interface BottomNavigationProps {
 }
 
 export function BottomNavigation({ currentPage, onNavigate, onProfileClick, theme }: BottomNavigationProps) {
-  const isDark = theme === 'dark';
-  
   return (
-    <div className={`fixed bottom-0 left-0 right-0 ${isDark ? 'bg-slate-800/95' : 'bg-white/95'} backdrop-blur-2xl border-t ${isDark ? 'border-slate-700' : 'border-slate-200'} z-20 pb-[env(safe-area-inset-bottom,0px)]`}>
-      <div className="mx-auto max-w-[430px] px-6 pt-3 pb-7">
+    <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-xl border-t border-border z-20">
+      <div className="mx-auto max-w-[430px] px-6 pt-2 pb-6 safe-area-inset-bottom">
         <div className="flex items-center justify-around">
-          <button 
+          <button
             onClick={() => onNavigate('home')}
-            className="flex flex-col items-center gap-1.5 min-w-[60px]"
+            className="flex flex-col items-center gap-1 min-w-[60px]"
           >
-            <div className={`w-11 h-11 rounded-[16px] ${isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center`}>
-              <Home size={22} className="text-gray-500" strokeWidth={2.5} />
-            </div>
-            <span className="text-[11px] text-gray-500 font-medium">Home</span>
+            {currentPage === 'home' ? (
+              <div className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center">
+                <Home size={22} className="text-primary-foreground" strokeWidth={2.5} />
+              </div>
+            ) : (
+              <Home size={22} className="text-muted-foreground" strokeWidth={2} />
+            )}
+            <span className={`text-[10px] font-semibold ${currentPage === 'home' ? 'text-foreground' : 'text-muted-foreground'}`}>
+              Home
+            </span>
           </button>
 
-          <button 
+          <button
             onClick={() => onNavigate('groups')}
-            className="flex flex-col items-center gap-1.5 min-w-[60px]"
+            className="flex flex-col items-center gap-1 min-w-[60px]"
           >
-            <div className={`w-11 h-11 rounded-[16px] ${currentPage === 'groups' ? 'bg-purple-600' : isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center`}>
-              <Users size={22} className={currentPage === 'groups' ? 'text-white' : 'text-gray-500'} strokeWidth={2.5} />
-            </div>
-            <span className={`text-[11px] ${currentPage === 'groups' ? 'text-purple-600 font-semibold' : 'text-gray-500 font-medium'}`}>Groups</span>
+            {currentPage === 'groups' ? (
+              <div className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center">
+                <Users size={22} className="text-primary-foreground" strokeWidth={2.5} />
+              </div>
+            ) : (
+              <Users size={22} className="text-muted-foreground" strokeWidth={2} />
+            )}
+            <span className={`text-[10px] font-semibold ${currentPage === 'groups' ? 'text-foreground' : 'text-muted-foreground'}`}>
+              Groups
+            </span>
           </button>
 
-          <button 
+          <button
             onClick={() => onNavigate('createGroup')}
-            className="flex flex-col items-center gap-1.5 min-w-[60px] -mt-4"
+            className="flex flex-col items-center gap-1 min-w-[60px] -mt-2"
           >
-            <div className="w-14 h-14 rounded-full bg-purple-600 flex items-center justify-center shadow-lg">
-              <Plus size={28} className="text-white" strokeWidth={2.5} />
+            <div className="w-12 h-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center active:scale-95 transition-transform shadow-lg">
+              <Plus size={24} className="text-primary-foreground" strokeWidth={2.5} />
             </div>
           </button>
 
-          <button 
+          <button
             onClick={() => onNavigate('activity')}
-            className="flex flex-col items-center gap-1.5 min-w-[60px]"
+            className="flex flex-col items-center gap-1 min-w-[60px]"
           >
-            <div className={`w-11 h-11 rounded-[16px] ${currentPage === 'activity' ? 'bg-purple-600' : isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center`}>
-              <Receipt size={22} className={currentPage === 'activity' ? 'text-white' : 'text-gray-500'} strokeWidth={2.5} />
-            </div>
-            <span className={`text-[11px] ${currentPage === 'activity' ? 'text-purple-600 font-semibold' : 'text-gray-500 font-medium'}`}>Activity</span>
+            {currentPage === 'activity' ? (
+              <div className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center">
+                <Receipt size={22} className="text-primary-foreground" strokeWidth={2.5} />
+              </div>
+            ) : (
+              <Receipt size={22} className="text-muted-foreground" strokeWidth={2} />
+            )}
+            <span className={`text-[10px] font-semibold ${currentPage === 'activity' ? 'text-foreground' : 'text-muted-foreground'}`}>
+              Activity
+            </span>
           </button>
 
-          <button 
+          <button
             onClick={onProfileClick}
-            className="flex flex-col items-center gap-1.5 min-w-[60px]"
+            className="flex flex-col items-center gap-1 min-w-[60px]"
           >
-            <div className={`w-11 h-11 rounded-[16px] ${isDark ? 'bg-slate-700' : 'bg-slate-100'} flex items-center justify-center`}>
-              <User size={22} className="text-gray-500" strokeWidth={2.5} />
-            </div>
-            <span className="text-[11px] text-gray-500 font-medium">Profile</span>
+            {currentPage === 'account' ? (
+              <div className="w-11 h-11 rounded-xl bg-primary flex items-center justify-center">
+                <User size={22} className="text-primary-foreground" strokeWidth={2.5} />
+              </div>
+            ) : (
+              <User size={22} className="text-muted-foreground" strokeWidth={2} />
+            )}
+            <span className={`text-[10px] font-semibold ${currentPage === 'account' ? 'text-foreground' : 'text-muted-foreground'}`}>
+              Profile
+            </span>
           </button>
         </div>
       </div>

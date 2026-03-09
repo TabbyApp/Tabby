@@ -274,6 +274,8 @@ transactionsRouter.put('/:id/items/:itemId/claims', requireAuth, async (req, res
     await query('INSERT INTO item_claims (receipt_item_id, user_id, receipt_id) VALUES ($1, $2, $3) ON CONFLICT (receipt_item_id, user_id) DO NOTHING', [itemId, uid, receiptId]);
   }
   const { rows: claimRows } = await query<{ user_id: string }>('SELECT user_id FROM item_claims WHERE receipt_item_id = $1', [itemId]);
+  void emitToGroup(tx.group_id, 'group:updated', { groupId: tx.group_id });
+  void emitToGroup(tx.group_id, 'receipt:claims-updated', { receiptId, groupId: tx.group_id });
   res.json({ userIds: claimRows.map((c) => c.user_id) });
 });
 
@@ -480,6 +482,7 @@ transactionsRouter.post('/:id/settle', requireAuth, async (req, res) => {
   await query('UPDATE transactions SET status = $1, settled_at = $2, archived_at = $3 WHERE id = $4', ['SETTLED', now, now, id]);
   await query('UPDATE groups SET last_settled_at = $1 WHERE id = $2', [now, tx.group_id]);
 
+  void emitToGroup(tx.group_id, 'groups:changed', {});
   void emitToGroup(tx.group_id, 'group:updated', { groupId: tx.group_id });
   void emitToGroup(tx.group_id, 'activity:changed', { groupId: tx.group_id });
   const { rows: allocs } = await query<{ user_id: string; amount: number; name: string }>(`
