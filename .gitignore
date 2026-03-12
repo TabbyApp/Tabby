@@ -34,6 +34,19 @@ build/
 .env.*
 !.env.example
 server/secrets/
+*.pem
+*.p8
+*.p12
+*.cer
+*.key
+*.mobileprovision
+*.jks
+*.keystore
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+firebase-admin*.json
+credentials*.json
 
 ### Local data ###
 data/
@@ -47,5 +60,30 @@ coverage/
 tmp/
 temp/
 
+### Expo / React Native local ###
+.expo/
+.expo-shared/
+mobile/.expo/
+mobile/web-build/
+mobile/dist/
+.metro-health-check*
+
+### Native build / Xcode local ###
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+ios/build/
+android/.gradle/
+android/app/debug/
+android/app/release/
+mobile/ios/build/
+mobile/android/.gradle/
+mobile/android/app/debug/
+mobile/android/app/release/
+
 ### Cursor / IDE ###
 .cursor/
+.idea/
+.vscode/
