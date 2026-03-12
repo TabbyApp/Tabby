@@ -71,7 +71,10 @@ export async function requireBankLinked(req: Request, res: Response, next: NextF
   const { rows } = await query<{ bank_linked?: boolean }>('SELECT bank_linked FROM users WHERE id = $1', [userId]);
   const row = rows[0];
   if (!row || !row.bank_linked) {
-    return res.status(403).json({ error: 'Please link your bank account before performing this action' });
+    return res.status(403).json({
+      code: 'PAYMENT_METHOD_REQUIRED',
+      error: 'Link your bank account before joining or paying with a group',
+    });
   }
   next();
 }

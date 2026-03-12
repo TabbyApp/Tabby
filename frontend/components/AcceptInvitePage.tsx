@@ -10,12 +10,16 @@ interface AcceptInvitePageProps {
   inviteCode?: string;
   /** Called after successful join; may return a Promise so joiner can await group list refresh before navigating */
   onAccepted?: () => void | Promise<void>;
+  onDeclined?: () => void | Promise<void>;
+  onIgnored?: () => void | Promise<void>;
+  onRequireBankLink?: () => void;
 }
 
-export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted }: AcceptInvitePageProps) {
+export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted, onDeclined, onIgnored, onRequireBankLink }: AcceptInvitePageProps) {
   const [isAccepting, setIsAccepting] = useState(false);
   const [isDeclining, setIsDeclining] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsBankLink, setNeedsBankLink] = useState(false);
   const [groupName, setGroupName] = useState<string>('Group Invitation');
 
   useEffect(() => {
@@ -35,12 +39,19 @@ export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted }: 
     }
     setIsAccepting(true);
     setError(null);
+    setNeedsBankLink(false);
     try {
       const result = await api.groups.joinByToken(inviteCode);
       await onAccepted?.();
       onNavigate('groupDetail', result.groupId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to join group');
+      const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+      if (code === 'PAYMENT_METHOD_REQUIRED') {
+        setNeedsBankLink(true);
+        setError('You need to link a bank account before you can join this group.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to join group');
+      }
     } finally {
       setIsAccepting(false);
     }
@@ -48,11 +59,16 @@ export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted }: 
 
   const handleDecline = () => {
     setIsDeclining(true);
-    onAccepted?.();
+    void onDeclined?.();
     setTimeout(() => {
       setIsDeclining(false);
       onNavigate('home');
     }, 500);
+  };
+
+  const handleIgnore = async () => {
+    await onIgnored?.();
+    onNavigate('home');
   };
 
   if (!inviteCode) {
@@ -99,6 +115,15 @@ export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted }: 
             </motion.div>
           )}
 
+          {needsBankLink && (
+            <button
+              onClick={() => onRequireBankLink?.()}
+              className="mb-4 w-full rounded-[20px] border border-border bg-card py-4 text-[17px] font-semibold text-foreground transition-transform active:scale-[0.98]"
+            >
+              Link Bank Account
+            </button>
+          )}
+
           <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="space-y-3">
             <button onClick={handleAccept} disabled={isAccepting || isDeclining}
               className={`w-full py-4 rounded-[20px] font-bold transition-all flex items-center justify-center gap-2.5 text-[17px] ${
@@ -111,6 +136,13 @@ export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted }: 
                 isAccepting || isDeclining ? 'bg-muted text-muted-foreground cursor-not-allowed' : 'bg-card border border-border text-foreground active:scale-[0.98]'
               }`}>
               {isDeclining ? (<><div className="w-5 h-5 border-3 border-foreground border-t-transparent rounded-full animate-spin" />Declining...</>) : (<><X size={24} strokeWidth={2.5} />Decline</>)}
+            </button>
+            <button
+              onClick={handleIgnore}
+              disabled={isAccepting || isDeclining}
+              className="w-full py-4 rounded-[20px] font-semibold transition-all bg-secondary text-foreground active:scale-[0.98] disabled:opacity-60"
+            >
+              Ignore for Now
             </button>
           </motion.div>
 

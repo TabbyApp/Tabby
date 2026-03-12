@@ -9,8 +9,9 @@ bootstrapRouter.get('/', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;
 
   const [userRes, groupsRes, cardsRes] = await Promise.all([
-    query<{ id: string; email: string; name: string; phone: string; created_at: string; bank_linked: boolean; avatar_url: string | null; payment_methods_json: string | null }>(`
+    query<{ id: string; email: string; name: string; phone: string; created_at: string; bank_linked: boolean; avatar_url: string | null; date_of_birth: string | null; onboarding_completed: boolean; payment_methods_json: string | null }>(`
       SELECT u.id, u.email, u.name, COALESCE(u.phone, '') as phone, u.created_at, COALESCE(u.bank_linked, false) as bank_linked, u.avatar_url,
+             u.date_of_birth, COALESCE(u.onboarding_completed, false) as onboarding_completed,
              (SELECT json_agg(json_build_object('id', id, 'type', type, 'last_four', last_four, 'brand', brand, 'created_at', created_at))
               FROM payment_methods WHERE user_id = u.id)::text as payment_methods_json
       FROM users u WHERE u.id = $1
@@ -81,6 +82,8 @@ bootstrapRouter.get('/', requireAuth, async (req, res) => {
       phone: userRow.phone,
       created_at: userRow.created_at,
       bank_linked: !!userRow.bank_linked,
+      dateOfBirth: userRow.date_of_birth,
+      onboardingCompleted: !!userRow.onboarding_completed,
       avatarUrl: userRow.avatar_url,
       paymentMethods: paymentMethods.filter((p) => p != null),
     },

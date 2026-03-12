@@ -563,7 +563,7 @@ groupsRouter.delete('/:groupId/members/:memberId', requireAuth, async (req, res)
   void emitToGroup(groupId, 'group:updated', { groupId });
 });
 
-// Create transaction (on receipt upload or manual total entry). For FULL_CONTROL, optional receiptId links existing completed receipt.
+// Create transaction (on receipt upload or manual total entry). A completed receipt may be linked for either split mode.
 groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, async (req, res) => {
   const { userId } = (req as any).user;
   const groupId = param(req.params.groupId);
@@ -590,7 +590,7 @@ groupsRouter.post('/:groupId/transactions', requireAuth, requireBankLinked, asyn
     [id, groupId, userId, splitMode, deadline]
   );
 
-  if (splitMode === 'FULL_CONTROL' && bodyReceiptId && typeof bodyReceiptId === 'string') {
+  if (bodyReceiptId && typeof bodyReceiptId === 'string') {
     const { rowCount } = await query(
       'UPDATE receipts SET transaction_id = $1 WHERE id = $2 AND group_id = $3 AND status = $4 AND (transaction_id IS NULL OR transaction_id = $1)',
       [id, bodyReceiptId.trim(), groupId, 'completed']

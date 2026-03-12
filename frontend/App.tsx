@@ -24,6 +24,7 @@ import { TwoFactorAuthPage } from './components/TwoFactorAuthPage';
 import { ForgotPasswordPage } from './components/ForgotPasswordPage';
 import { AcceptInvitePage } from './components/AcceptInvitePage';
 import { ProAccountPage } from './components/ProAccountPage';
+import { AccountSetupPage } from './components/AccountSetupPage';
 import { useAuth } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
 import { api } from './lib/api';
@@ -32,7 +33,7 @@ import { prefetchAllGroupDetails, invalidateGroupCache } from './lib/groupCache'
 export type PageType = 'home' | 'groups' | 'activity' | 'account' | 'settings' | 
   'wallet' | 'cardDetails' | 'createGroup' | 'receiptScan' | 'receiptItems' | 'processing' |
   'groupDetail' | 'notifications' | 'notificationsSettings' | 'privacySettings' | 'helpSupport' | 
-  'appearanceSettings' | 'changePassword' | 'twoFactorAuth' | 'forgotPassword' | 'acceptInvite' | 'proAccount';
+  'appearanceSettings' | 'changePassword' | 'twoFactorAuth' | 'forgotPassword' | 'acceptInvite' | 'proAccount' | 'accountSetup';
 
 // Group shape used by components - uses real backend string IDs
 export interface AppGroup {
@@ -46,7 +47,44 @@ export interface AppGroup {
   supportCode?: string | null;
 }
 
+interface AppNotification {
+  id: string;
+  type: 'invite' | 'receipt' | 'payment' | 'group';
+  title: string;
+  message: string;
+  createdAt: string;
+  read: boolean;
+  groupId?: string;
+  groupName?: string;
+  inviterName?: string;
+  inviteToken?: string;
+  source?: 'server' | 'local';
+}
+
+type StoredInviteNotification = {
+  token: string;
+  groupName?: string;
+  createdAt: string;
+};
+
 const GROUP_COLORS = ['#3B82F6', '#A855F7', '#22C55E', '#F97316', '#EC4899', '#14B8A6', '#F59E0B', '#6366F1'];
+const LOCAL_INVITE_NOTIFICATIONS_KEY = 'tabby_local_invite_notifications';
+
+function readStoredInviteNotifications(): StoredInviteNotification[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(LOCAL_INVITE_NOTIFICATIONS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredInviteNotifications(items: StoredInviteNotification[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(LOCAL_INVITE_NOTIFICATIONS_KEY, JSON.stringify(items));
+}
 
 export default function App() {
   const { user, groups: bootstrapGroups, virtualCards: bootstrapCards, loading: authLoading, logout, refreshBootstrap } = useAuth();
@@ -103,25 +141,61 @@ export default function App() {
   // Preloaded virtual card info for LandingPage
   const [cardInfo, setCardInfo] = useState<{ lastFour: string; balance: number; groupId?: string } | null>(null);
 
-  // Notifications (UI-only for now - no backend endpoint)
-  const [notifications, setNotifications] = useState<Array<{
-    id: number; type: string; title: string; message: string; time: string; read: boolean;
-  }>>([]);
-  const [pendingInvites, setPendingInvites] = useState<Array<{
-    id: number; groupName: string; inviterName: string; members: number;
-  }>>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
+  const [accountNotice, setAccountNotice] = useState<string | null>(null);
   const [groupKickedReason, setGroupKickedReason] = useState<'removed' | 'deleted' | null>(null);
 
   const unreadNotificationCount = notifications.filter(n => !n.read).length;
+  const pendingInvites = useMemo(() => {
+    return notifications
+      .filter((n) => n.type === 'invite')
+      .map((n) => ({
+        id: n.id,
+        groupName: n.groupName ?? 'Group Invitation',
+        inviterName: n.inviterName ?? 'Tabby',
+        members: 0,
+      }));
+  }, [notifications]);
 
   // Parse /join/:token from URL on load (invite links). Persist so it survives login redirect/reload on deploy.
   const JOIN_TOKEN_KEY = 'tabby_join_token';
+  const clearPendingInviteToken = useCallback(() => {
+    setPendingInviteToken(null);
+    try {
+      sessionStorage.removeItem(JOIN_TOKEN_KEY);
+    } catch {}
+  }, []);
+
+  const upsertLocalInviteNotification = useCallback(async (token: string) => {
+    const existing = readStoredInviteNotifications();
+    if (existing.some((item) => item.token === token)) return;
+
+    let groupName: string | undefined;
+    try {
+      const preview = await api.groups.joinPreview(token);
+      groupName = preview.groupName;
+    } catch {
+      groupName = undefined;
+    }
+
+    writeStoredInviteNotifications([
+      { token, groupName, createdAt: new Date().toISOString() },
+      ...existing,
+    ]);
+  }, []);
+
+  const removeLocalInviteNotification = useCallback((token: string) => {
+    const next = readStoredInviteNotifications().filter((item) => item.token !== token);
+    writeStoredInviteNotifications(next);
+  }, []);
+
   useEffect(() => {
     const m = window.location.pathname.match(/^\/join\/([a-f0-9]+)$/i);
     if (m?.[1]) {
       const token = m[1];
       setPendingInviteToken(token);
+      void upsertLocalInviteNotification(token);
       try {
         sessionStorage.setItem(JOIN_TOKEN_KEY, token);
       } catch {}
@@ -130,14 +204,7 @@ export default function App() {
       const stored = sessionStorage.getItem(JOIN_TOKEN_KEY);
       if (stored) setPendingInviteToken(stored);
     }
-  }, []);
-
-  const clearPendingInviteToken = useCallback(() => {
-    setPendingInviteToken(null);
-    try {
-      sessionStorage.removeItem(JOIN_TOKEN_KEY);
-    } catch {}
-  }, []);
+  }, [upsertLocalInviteNotification]);
 
   const handlePostAuth = useCallback(() => {
     // Auth completed; AuthContext already updated user state
@@ -152,6 +219,68 @@ export default function App() {
       // Keep existing on error
     }
   }, [user, refreshBootstrap]);
+
+  const loadNotifications = useCallback(async () => {
+    if (!user) {
+      setNotifications([]);
+      return;
+    }
+
+    const [serverNotifications, localInviteNotifications] = await Promise.all([
+      api.users.notifications().catch(() => [] as Array<{
+        id: string;
+        type: 'invite' | 'receipt' | 'payment' | 'group';
+        title: string;
+        message: string;
+        createdAt: string;
+        read?: boolean;
+        groupId?: string;
+        groupName?: string;
+        inviterName?: string;
+        inviteToken?: string;
+        source?: 'server';
+      }>),
+      (async () => {
+        const stored = readStoredInviteNotifications();
+        const enriched = await Promise.all(
+          stored.map(async (item) => {
+            if (item.groupName) return item;
+            try {
+              const preview = await api.groups.joinPreview(item.token);
+              return { ...item, groupName: preview.groupName };
+            } catch {
+              return item;
+            }
+          })
+        );
+        writeStoredInviteNotifications(enriched);
+        return enriched;
+      })(),
+    ]);
+
+    const next = [
+      ...serverNotifications.map((n) => ({ ...n, source: 'server' as const })),
+      ...localInviteNotifications.map((item) => ({
+        id: `local-invite:${item.token}`,
+        type: 'invite' as const,
+        title: 'Group Invitation',
+        message: `You were invited to join ${item.groupName ?? 'a group'}`,
+        createdAt: item.createdAt,
+        groupName: item.groupName,
+        inviteToken: item.token,
+        source: 'local' as const,
+      })),
+    ]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    setNotifications((prev) => {
+      const readMap = new Map(prev.map((item) => [item.id, item.read]));
+      return next.map((item) => ({
+        ...item,
+        read: readMap.get(item.id) ?? false,
+      }));
+    });
+  }, [user]);
 
   // Use bootstrap data (user + groups + virtualCards). loadGroups (used by socket handlers) triggers refreshBootstrap → this effect runs → setGroups → activeGroups/recentGroups recompute.
   useEffect(() => {
@@ -195,14 +324,79 @@ export default function App() {
     setInitialDataLoaded(true);
   }, [authLoading, user, bootstrapGroups, bootstrapCards]);
 
-  const acceptInvite = (inviteId: number) => {
-    setPendingInvites(prev => prev.filter(inv => inv.id !== inviteId));
-    loadGroups();
-  };
+  useEffect(() => {
+    if (authLoading) return;
+    void loadNotifications();
+  }, [authLoading, user, bootstrapGroups, loadNotifications]);
 
-  const declineInvite = (inviteId: number) => {
-    setPendingInvites(prev => prev.filter(inv => inv.id !== inviteId));
-  };
+  const navigateToGroup = useCallback((groupId: string) => {
+    setPageHistory((prev) => [...prev, currentPage]);
+    setCurrentPage('groupDetail');
+    const isSwitchingToDifferentGroup = selectedGroupId !== null && selectedGroupId !== groupId;
+    setSelectedGroupId(groupId);
+    if (isSwitchingToDifferentGroup) {
+      setReceiptData(null);
+      setItemSplitData({ hasSelectedItems: false, yourItemsTotal: 0 });
+      setLastReceiptId(null);
+      setProcessingGroupId(null);
+      setCurrentTransactionId(null);
+    }
+  }, [currentPage, selectedGroupId]);
+
+  const openAccountForBankLink = useCallback((message?: string) => {
+    setAccountNotice(message ?? 'Link your bank account to join this group.');
+    setPageHistory((prev) => [...prev, currentPage]);
+    setCurrentPage('account');
+  }, [currentPage]);
+
+  const acceptInvite = useCallback(async (notificationId: string) => {
+    const notification = notifications.find((item) => item.id === notificationId);
+    if (!notification?.inviteToken) return;
+
+    try {
+      if (notification.source === 'local') {
+        const result = await api.groups.joinByToken(notification.inviteToken);
+        removeLocalInviteNotification(notification.inviteToken);
+        if (pendingInviteToken === notification.inviteToken) clearPendingInviteToken();
+        setNotifications((prev) => prev.filter((item) => item.id !== notificationId));
+        await loadGroups();
+        navigateToGroup(result.groupId);
+        return;
+      }
+
+      const group = await api.invites.accept(notification.inviteToken);
+      if (pendingInviteToken === notification.inviteToken) clearPendingInviteToken();
+      setNotifications((prev) => prev.filter((item) => item.id !== notificationId));
+      await loadGroups();
+      navigateToGroup(group.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to accept invite';
+      const code = err instanceof Error ? (err as Error & { code?: string }).code : undefined;
+      if (code === 'PAYMENT_METHOD_REQUIRED') {
+        openAccountForBankLink('You need to link a bank account before joining this group.');
+        return;
+      }
+      window.alert(message);
+    }
+  }, [notifications, removeLocalInviteNotification, pendingInviteToken, clearPendingInviteToken, loadGroups, navigateToGroup, openAccountForBankLink]);
+
+  const declineInvite = useCallback(async (notificationId: string) => {
+    const notification = notifications.find((item) => item.id === notificationId);
+    if (!notification?.inviteToken) return;
+
+    try {
+      if (notification.source === 'local') {
+        removeLocalInviteNotification(notification.inviteToken);
+      } else {
+        await api.invites.decline(notification.inviteToken);
+      }
+
+      if (pendingInviteToken === notification.inviteToken) clearPendingInviteToken();
+      setNotifications((prev) => prev.filter((item) => item.id !== notificationId));
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Failed to decline invite');
+    }
+  }, [notifications, removeLocalInviteNotification, pendingInviteToken, clearPendingInviteToken]);
 
   const deleteGroup = async (groupId: string) => {
     try {
@@ -252,6 +446,9 @@ export default function App() {
   }, [loadGroups]);
 
   const handleNavigate = (page: PageType, groupId?: string) => {
+    if (page !== 'account') {
+      setAccountNotice(null);
+    }
     setPageHistory(prev => [...prev, currentPage]);
     setCurrentPage(page);
     if (groupId !== undefined) {
@@ -311,20 +508,32 @@ export default function App() {
   };
 
   const isAuthenticated = !!user;
+  const localOnboardingCompleted =
+    !!user?.id &&
+    typeof window !== 'undefined' &&
+    window.localStorage.getItem(`tabby_onboarding_completed:${user.id}`) === 'true';
+  const needsAccountSetup = isAuthenticated && !(user?.onboardingCompleted || localOnboardingCompleted);
 
   // Keep splash visible until: (1) animation is done AND (2) auth resolved AND (3) initial data loaded
   const showSplash = !splashAnimDone || authLoading || !initialDataLoaded;
 
-  // When logged in and we have a pending invite token, navigate to accept page
+  // First-time users complete account setup before entering the app or accepting invites.
   useEffect(() => {
-    if (isAuthenticated && pendingInviteToken && !showSplash && currentPage === 'home') {
+    if (!showSplash && needsAccountSetup && currentPage !== 'accountSetup') {
+      setCurrentPage('accountSetup');
+    }
+  }, [showSplash, needsAccountSetup, currentPage]);
+
+  // When logged in and we have a pending invite token, navigate to accept page after setup
+  useEffect(() => {
+    if (isAuthenticated && !needsAccountSetup && pendingInviteToken && !showSplash && currentPage === 'home') {
       setCurrentPage('acceptInvite');
     }
-  }, [isAuthenticated, pendingInviteToken, currentPage, showSplash]);
+  }, [isAuthenticated, pendingInviteToken, currentPage, showSplash, needsAccountSetup]);
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-[430px] min-h-screen bg-background relative overflow-hidden pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
+    <div className="h-[100dvh] min-h-[100dvh] bg-background overflow-hidden">
+      <div className="mx-auto max-w-[430px] h-full bg-background relative overflow-hidden pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
         {showSplash ? (
           <SplashScreen
             onComplete={() => setSplashAnimDone(true)}
@@ -337,20 +546,28 @@ export default function App() {
         ) : (
           <SocketProvider
             enabled={!!user}
-            onGroupsChanged={loadGroups}
-            onGroupUpdated={(groupId) => invalidateGroupCache(groupId)}
-            onActivityChanged={() => {}}
+            onGroupsChanged={() => {
+              void loadGroups();
+              void loadNotifications();
+            }}
+            onGroupUpdated={(groupId) => {
+              invalidateGroupCache(groupId);
+              void loadNotifications();
+            }}
+            onActivityChanged={() => { void loadNotifications(); }}
             onRemovedFromGroup={handleRemovedFromGroup}
             onGroupDeleted={handleGroupDeleted}
           >
-          <AnimatePresence mode="wait">
+          <div className="relative h-full min-h-0">
+          <AnimatePresence initial={false} mode="sync">
             <motion.div
               key={currentPage}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
-              className="w-full min-h-full"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.14, ease: 'easeOut' }}
+              className="absolute inset-0 w-full h-full"
+              style={{ willChange: 'opacity' }}
             >
               {currentPage === 'home' && (
                 <LandingPage 
@@ -368,7 +585,7 @@ export default function App() {
                 />
               )}
               {currentPage === 'activity' && <ActivityPage onNavigate={handleNavigate} theme={theme} />}
-              {currentPage === 'account' && <AccountPage onNavigate={handleNavigate} theme={theme} />}
+              {currentPage === 'account' && <AccountPage onNavigate={handleNavigate} theme={theme} notice={accountNotice} />}
               {currentPage === 'settings' && <SettingsPage onNavigate={handleNavigate} theme={theme} onThemeChange={handleThemeChange} onLogout={handleLogout} />}
               {currentPage === 'wallet' && <VirtualWalletPage onNavigate={handleNavigate} theme={theme} />}
               {currentPage === 'cardDetails' && <CardDetailsPage onNavigate={handleNavigate} theme={theme} groupId={selectedGroupId ?? undefined} />}
@@ -389,12 +606,33 @@ export default function App() {
                   onNavigate={handleNavigate}
                   theme={theme}
                   inviteCode={pendingInviteToken ?? undefined}
-                  onAccepted={async () => { clearPendingInviteToken(); await loadGroups(); }}
+                  onRequireBankLink={() => openAccountForBankLink('You need to link a bank account before joining this group.')}
+                  onAccepted={async () => {
+                    if (pendingInviteToken) removeLocalInviteNotification(pendingInviteToken);
+                    clearPendingInviteToken();
+                    await loadGroups();
+                    await loadNotifications();
+                  }}
+                  onDeclined={async () => {
+                    if (pendingInviteToken) removeLocalInviteNotification(pendingInviteToken);
+                    clearPendingInviteToken();
+                    await loadNotifications();
+                  }}
+                  onIgnored={() => {
+                    clearPendingInviteToken();
+                  }}
                 />
               )}
               {currentPage === 'proAccount' && <ProAccountPage onNavigate={handleNavigate} theme={theme} currentPlan={accountType} onUpgrade={handleUpgradeToPro} />}
+              {currentPage === 'accountSetup' && (
+                <AccountSetupPage
+                  theme={theme}
+                  onComplete={() => setCurrentPage(pendingInviteToken ? 'acceptInvite' : 'home')}
+                />
+              )}
             </motion.div>
           </AnimatePresence>
+          </div>
           </SocketProvider>
         )}
         {/* Modal: removed from group / group deleted */}

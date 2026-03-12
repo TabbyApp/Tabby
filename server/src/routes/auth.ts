@@ -29,8 +29,8 @@ function generateOtp(): string {
 
 authRouter.post('/signup', async (req, res) => {
   const { email, password, name } = req.body;
-  if (!email || !password || !name) {
-    return res.status(400).json({ error: 'Email, password, and name are required' });
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: 'Password must be at least 6 characters' });
@@ -44,10 +44,13 @@ authRouter.post('/signup', async (req, res) => {
   const id = genId();
   const rounds = process.env.NODE_ENV === 'production' ? 10 : 4; // Faster in dev
   const passwordHash = await bcrypt.hash(password, rounds);
+  const normalizedName = typeof name === 'string' && name.trim().length >= 2
+    ? name.trim()
+    : 'New User';
 
   await query(
     'INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4)',
-    [id, email.toLowerCase().trim(), passwordHash, name.trim()]
+    [id, email.toLowerCase().trim(), passwordHash, normalizedName]
   );
 
   const accessToken = signAccessToken({ userId: id, email: email.toLowerCase() });
@@ -70,7 +73,7 @@ authRouter.post('/signup', async (req, res) => {
     .json({
       accessToken,
       expiresIn: 15 * 60,
-      user: { id, email: email.toLowerCase(), name: name.trim() },
+      user: { id, email: email.toLowerCase(), name: normalizedName },
     });
 });
 
@@ -187,7 +190,13 @@ authRouter.post('/send-otp', async (req, res) => {
       });
       return res.json({ ok: true, message: 'Code sent via SMS.' });
     } catch (err: any) {
-      console.error('Twilio Verify send failed:', err?.message);
+      const message = err?.message || 'Failed to send code. Please try again.';
+      console.error('Twilio Verify send failed:', message);
+      if (/trial accounts cannot send messages to unverified numbers/i.test(message)) {
+        return res.status(500).json({
+          error: 'Twilio trial accounts can only send OTPs to verified phone numbers. Verify the destination number in Twilio or upgrade the Twilio account.',
+        });
+      }
       return res.status(500).json({ error: 'Failed to send code. Please try again.' });
     }
   }
@@ -207,7 +216,7 @@ authRouter.post('/send-otp', async (req, res) => {
   });
 });
 
-// Verify OTP and sign in or sign up. New users must send name.
+// Verify OTP and sign in or sign up. New users get a placeholder name until onboarding.
 authRouter.post('/verify-otp', async (req, res) => {
   const { phone, code, name } = req.body;
   const raw = typeof phone === 'string' ? phone.trim() : '';
@@ -267,10 +276,7 @@ authRouter.post('/verify-otp', async (req, res) => {
   let user = userRows[0];
 
   if (!user) {
-    const nameStr = typeof name === 'string' ? name.trim() : '';
-    if (!nameStr || nameStr.length < 2) {
-      return res.status(400).json({ error: 'Name is required for new accounts (at least 2 characters)' });
-    }
+    const nameStr = typeof name === 'string' && name.trim().length >= 2 ? name.trim() : 'New User';
     const id = genId();
     const placeholderEmail = `p${normalized.replace(/\D/g, '')}@phone.tabby.local`;
     const passwordPlaceholder = crypto.randomBytes(32).toString('hex');
