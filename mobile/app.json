@@ -51,9 +51,9 @@
       ]
     ],
     "extra": {
-      "apiUrl": "http://127.0.0.1:3001/api",
+      "apiUrl": "https://tabby-hnk8.onrender.com/api",
       "eas": {
-        "projectId": "replace-with-your-eas-project-id"
+        "projectId": "afa739d5-e681-4f2a-8dfe-985f76eae6cf"
       }
     },
     "runtimeVersion": {

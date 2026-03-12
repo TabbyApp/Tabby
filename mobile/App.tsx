@@ -2203,17 +2203,22 @@ function GroupDetailScreen({ route, navigation }: any) {
 
           {isViewOnly && group.lastSettledAllocations?.length ? (
             <SectionCard>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(16,185,129,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="checkmark" size={24} color={palette.success} />
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(34,197,94,0.14)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="checkmark" size={20} color={palette.success} />
                 </View>
                 <View>
                   <Text style={styles.cardTitle}>Payment Complete</Text>
                   <Text style={styles.caption}>Everyone has been charged</Text>
                 </View>
               </View>
-              <Text style={[styles.listTitle, { marginBottom: 4 }]}>What each person paid</Text>
-              <Text style={[styles.caption, { marginBottom: 12 }]}>Tip is split by the host's choice; tax is proportional to what you ordered.</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <Text style={[styles.listTitle, { fontSize: 14 }]}>Final breakdown</Text>
+                <View style={{ backgroundColor: 'rgba(34,197,94,0.12)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 }}>
+                  <Text style={{ color: palette.primary, fontSize: 10, fontWeight: '800', letterSpacing: 0.4 }}>SETTLED</Text>
+                </View>
+              </View>
+              <Text style={[styles.caption, { marginBottom: 10, fontSize: 12 }]}>Tax stays proportional to items claimed. Tip follows the host's final split.</Text>
               {group.lastSettledAllocations.map((alloc, allocIndex) => {
                 const breakdown = group.lastSettledBreakdown?.[alloc.user_id];
                 const items = group.lastSettledItemsPerUser?.[alloc.user_id];
@@ -2225,20 +2230,20 @@ function GroupDetailScreen({ route, navigation }: any) {
                     key={alloc.user_id}
                     style={{
                       backgroundColor: palette.cardMuted,
-                      borderRadius: 18,
-                      padding: 14,
-                      marginBottom: 10,
+                      borderRadius: 16,
+                      padding: 12,
+                      marginBottom: 8,
                       borderWidth: 1,
-                      borderColor: palette.border,
+                      borderColor: 'rgba(255,255,255,0.05)',
                     }}
                   >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
                         <View
                           style={{
-                            width: 38,
-                            height: 38,
-                            borderRadius: 19,
+                            width: 34,
+                            height: 34,
+                            borderRadius: 17,
                             backgroundColor: `${GROUP_COLORS[allocIndex % GROUP_COLORS.length]}22`,
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -2246,19 +2251,19 @@ function GroupDetailScreen({ route, navigation }: any) {
                             borderColor: `${GROUP_COLORS[allocIndex % GROUP_COLORS.length]}55`,
                           }}
                         >
-                          <Text style={{ color: palette.foreground, fontSize: 13, fontWeight: '800' }}>
+                          <Text style={{ color: palette.foreground, fontSize: 12, fontWeight: '800' }}>
                             {alloc.name.slice(0, 1).toUpperCase()}
                           </Text>
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.listTitle}>{alloc.name}</Text>
-                          <Text style={[styles.caption, { fontSize: 11 }]}>Final split</Text>
+                          <Text style={[styles.listTitle, { fontSize: 16 }]}>{alloc.name}</Text>
+                          <Text style={[styles.caption, { fontSize: 10 }]}>Final split</Text>
                         </View>
                       </View>
-                      <Text style={[styles.listAmount, { color: palette.success }]}>{formatCurrency(alloc.amount)}</Text>
+                      <Text style={[styles.listAmount, { color: palette.success, fontSize: 18 }]}>{formatCurrency(alloc.amount)}</Text>
                     </View>
 
-                    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
                       {[
                         { label: 'Items', value: itemSubtotal },
                         { label: 'Tax', value: taxAmount },
@@ -2268,29 +2273,29 @@ function GroupDetailScreen({ route, navigation }: any) {
                           key={stat.label}
                           style={{
                             flex: 1,
-                            backgroundColor: 'rgba(255,255,255,0.03)',
-                            borderRadius: 12,
-                            paddingHorizontal: 10,
-                            paddingVertical: 9,
+                            backgroundColor: 'rgba(255,255,255,0.025)',
+                            borderRadius: 10,
+                            paddingHorizontal: 8,
+                            paddingVertical: 8,
                             borderWidth: 1,
                             borderColor: 'rgba(255,255,255,0.04)',
                           }}
                         >
-                          <Text style={{ color: palette.muted, fontSize: 10, fontWeight: '700', marginBottom: 2 }}>{stat.label}</Text>
-                          <Text style={{ color: palette.foreground, fontSize: 12, fontWeight: '700' }}>{formatCurrency(stat.value)}</Text>
+                          <Text style={{ color: palette.muted, fontSize: 9, fontWeight: '700', marginBottom: 2 }}>{stat.label}</Text>
+                          <Text style={{ color: palette.foreground, fontSize: 11, fontWeight: '700' }}>{formatCurrency(stat.value)}</Text>
                         </View>
                       ))}
                     </View>
 
-                    <View style={{ paddingTop: 10, borderTopWidth: 1, borderTopColor: palette.border }}>
-                      <Text style={[styles.caption, { marginBottom: 6, fontSize: 11, fontWeight: '600', color: palette.secondaryText }]}>What they got</Text>
+                    <View style={{ paddingTop: 8, borderTopWidth: 1, borderTopColor: palette.border }}>
+                      <Text style={[styles.caption, { marginBottom: 5, fontSize: 10, fontWeight: '700', color: palette.secondaryText, textTransform: 'uppercase', letterSpacing: 0.6 }]}>What they got</Text>
                       {items?.length ? (
                         items.map((it, i) => (
-                          <View key={i} style={[styles.infoRow, { paddingVertical: 2 }]}>
-                            <Text style={[styles.caption, { flex: 1, paddingRight: 10, color: palette.secondaryText }]} numberOfLines={1}>
+                          <View key={i} style={[styles.infoRow, { paddingVertical: 1 }]}>
+                            <Text style={[styles.caption, { flex: 1, paddingRight: 10, color: palette.secondaryText, fontSize: 12 }]} numberOfLines={1}>
                               {it.name}
                             </Text>
-                            <Text style={[styles.caption, { color: palette.foreground }]}>{formatCurrency(it.price)}</Text>
+                            <Text style={[styles.caption, { color: palette.foreground, fontSize: 12 }]}>{formatCurrency(it.price)}</Text>
                           </View>
                         ))
                       ) : (
