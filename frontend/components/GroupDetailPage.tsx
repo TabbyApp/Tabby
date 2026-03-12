@@ -629,10 +629,10 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   return (
     <div className="h-full min-h-0 flex flex-col bg-background">
       <motion.div
-        initial={{ opacity: 0 }}
+        initial={false}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.12 }}
-        className="bg-card/95 backdrop-blur-xl border-b border-border px-5 py-4"
+        className="bg-card/95 border-b border-border px-5 py-4"
       >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
@@ -873,7 +873,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
           </div>
 
           {/* Members Dropdown */}
-          <AnimatePresence>
+          <AnimatePresence initial={false}>
             {showMembersDropdown && (
               <>
                 <div 
@@ -945,7 +945,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
 
         {/* Split Evenly Mode - hidden when view-only */}
         {!isViewOnly && (
-        <AnimatePresence mode="wait">
+        <AnimatePresence initial={false} mode="wait">
           {!hasReceipt ? (
             /* Single empty state for new groups: one "Add a Receipt" regardless of Split Evenly vs Item Split */
             <motion.div
@@ -1419,7 +1419,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       )}
 
       {/* Invite Sheet */}
-      <AnimatePresence>
+      <AnimatePresence initial={false}>
         {showInviteSheet && (
           <>
             <motion.div 

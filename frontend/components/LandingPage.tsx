@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { motion } from 'motion/react';
 import { CreditCard, Users, ArrowRight, Bell } from 'lucide-react';
 import { ProfileSheet } from './ProfileSheet';
 import { TabbyWordmark } from './TabbyLogo';
@@ -34,12 +33,7 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
 
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
-      <motion.div
-        initial={{ y: -10, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5 }}
-        className="px-6 pt-8 pb-6"
-      >
+      <div className="px-6 pt-8 pb-6">
         <div className="flex items-center justify-between">
           <TabbyWordmark />
           <button
@@ -54,17 +48,12 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
             )}
           </button>
         </div>
-      </motion.div>
+      </div>
 
       <div className="flex-1 overflow-y-auto px-6 pb-28">
         {/* Featured Card - show when we have card info or groups */}
         {(cardInfo || groups.length > 0) && (
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.1, duration: 0.6 }}
-            className="mb-10"
-          >
+          <div className="mb-10">
             <button
               onClick={() => (cardInfo?.groupId ? onNavigate('cardDetails', cardInfo.groupId) : onNavigate('wallet'))}
               className="w-full bg-card border border-border rounded-2xl p-6 active:scale-[0.99] transition-all relative overflow-hidden"
@@ -90,16 +79,11 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
                 </div>
               </div>
             </button>
-          </motion.div>
+          </div>
         )}
 
         {/* Active Groups */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.2, duration: 0.6 }}
-          className="mb-8"
-        >
+        <div className="mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
               Active Groups
@@ -116,13 +100,10 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
 
           {activeGroups.length > 0 ? (
             <div className="space-y-3">
-              {activeGroups.map((group, index) => (
-                <motion.button
+              {activeGroups.map((group) => (
+                <button
                   key={group.id}
                   onClick={() => onNavigate('groupDetail', group.id)}
-                  initial={{ x: -20, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: 0.3 + index * 0.05, duration: 0.5 }}
                   className="w-full bg-card border border-border rounded-2xl p-4 active:scale-[0.99] transition-all hover:border-border/80 text-left"
                 >
                   <div className="flex items-center justify-between">
@@ -143,7 +124,7 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
                       <ArrowRight size={16} className="text-muted-foreground" strokeWidth={2} />
                     </div>
                   </div>
-                </motion.button>
+                </button>
               ))}
             </div>
           ) : (
@@ -159,16 +140,11 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
               </button>
             </div>
           )}
-        </motion.div>
+        </div>
 
         {/* Recent Groups */}
         {recentGroups.length > 0 && (
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.25, duration: 0.6 }}
-            className="mb-8"
-          >
+          <div className="mb-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                 Recent Groups
@@ -181,13 +157,10 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
               </button>
             </div>
             <div className="space-y-3">
-              {recentGroups.slice(0, 3).map((group, index) => (
-                <motion.button
+              {recentGroups.slice(0, 3).map((group) => (
+                <button
                   key={group.id}
                   onClick={() => onNavigate('groupDetail', group.id)}
-                  initial={{ x: -20, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: 0.3 + index * 0.05, duration: 0.5 }}
                   className="w-full bg-card border border-border rounded-2xl p-4 active:scale-[0.99] transition-all opacity-80 hover:opacity-100 text-left"
                 >
                   <div className="flex items-center justify-between">
@@ -206,30 +179,22 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
                     </div>
                     <ArrowRight size={16} className="text-muted-foreground" strokeWidth={2} />
                   </div>
-                </motion.button>
+                </button>
               ))}
             </div>
-          </motion.div>
+          </div>
         )}
 
         {/* Pending Invites */}
         {pendingInvites.length > 0 && (
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.4, duration: 0.6 }}
-            className="mb-8"
-          >
+          <div className="mb-8">
             <h2 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-4">
               Pending Invites
             </h2>
             <div className="space-y-3">
-              {pendingInvites.map((invite, index) => (
-                <motion.div
+              {pendingInvites.map((invite) => (
+                <div
                   key={invite.id}
-                  initial={{ x: -20, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: 0.5 + index * 0.05, duration: 0.5 }}
                   className="w-full bg-card border border-border rounded-2xl p-4"
                 >
                   <div className="flex items-start gap-3 mb-4">
@@ -258,10 +223,10 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
                       Decline
                     </button>
                   </div>
-                </motion.div>
+                </div>
               ))}
             </div>
-          </motion.div>
+          </div>
         )}
       </div>
 

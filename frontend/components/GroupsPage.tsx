@@ -1,4 +1,3 @@
-import { motion } from 'motion/react';
 import { ChevronLeft, Users, Plus, Search, Archive } from 'lucide-react';
 import { useState } from 'react';
 import { BottomNavigation } from './BottomNavigation';
@@ -33,11 +32,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background">
-      <motion.div
-        initial={{ y: -10, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="bg-card border-b border-border px-6 py-6 flex-shrink-0 z-10"
-      >
+      <div className="bg-card border-b border-border px-6 py-6 flex-shrink-0 z-10">
         <div className="flex items-center gap-3 mb-6">
           <button
             onClick={() => onNavigate('home')}
@@ -78,7 +73,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
             Recent ({recentGroups.length})
           </button>
         </div>
-      </motion.div>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 pb-24">
         {displayGroups.length === 0 ? (
@@ -112,13 +107,10 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
         ) : (
           <>
             <div className="space-y-3 mb-6">
-              {displayGroups.map((group, index) => (
-                <motion.button
+              {displayGroups.map((group) => (
+                <button
                   key={group.id}
                   onClick={() => onNavigate('groupDetail', group.id)}
-                  initial={{ x: -20, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: index * 0.05, duration: 0.5 }}
                   className={`w-full bg-card border border-border rounded-2xl p-4 text-left ${
                     activeTab === 'active'
                       ? 'active:scale-[0.99] hover:border-border/80'
@@ -150,12 +142,12 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
                       <p className="text-xs text-muted-foreground">balance</p>
                     </div>
                   </div>
-                </motion.button>
+                </button>
               ))}
             </div>
 
             {activeTab === 'active' && (
-              <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.3 }}>
+              <div>
                 <button
                   onClick={() => onNavigate('createGroup')}
                   className="w-full bg-primary text-primary-foreground py-4 rounded-xl font-semibold active:scale-[0.99] transition-transform flex items-center justify-center gap-2"
@@ -163,7 +155,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
                   <Plus size={22} strokeWidth={2.5} />
                   Create New Group
                 </button>
-              </motion.div>
+              </div>
             )}
           </>
         )}

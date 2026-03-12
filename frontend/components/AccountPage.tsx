@@ -1,4 +1,3 @@
-import { motion } from 'motion/react';
 import { ChevronLeft, User, Mail, Phone, CreditCard, MapPin, Building2, Edit2, Check, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { BottomNavigation } from './BottomNavigation';
@@ -86,11 +85,7 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="bg-card border-b border-border px-5 py-4"
-      >
+      <div className="bg-card border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">
           <button
             onClick={() => onNavigate('home')}
@@ -100,25 +95,16 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
           </button>
           <h1 className="text-2xl font-bold text-foreground">Account</h1>
         </div>
-      </motion.div>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-24">
         {notice && (
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-5 rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-foreground"
-          >
+          <div className="mb-5 rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-foreground">
             {notice}
-          </motion.div>
+          </div>
         )}
 
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.12 }}
-          className="flex flex-col items-center mb-8"
-        >
+        <div className="flex flex-col items-center mb-8">
           <label className="relative cursor-pointer">
             <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} disabled={uploadingAvatar} />
             <div className="w-24 h-24 rounded-full overflow-hidden bg-primary flex items-center justify-center text-primary-foreground shadow-xl mb-4 ring-2 ring-border">
@@ -132,9 +118,9 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
               {uploadingAvatar ? 'Uploading...' : 'Change Photo'}
             </span>
           </label>
-        </motion.div>
+        </div>
 
-        <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }}>
+        <div>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Personal Information</h2>
           <div className="space-y-3">
             <div className="bg-card border border-border rounded-xl p-4">
@@ -195,9 +181,9 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
               </div>
             </div>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="mt-6">
+        <div className="mt-6">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Bank Account</h2>
 
           {bankLinked ? (
@@ -234,10 +220,10 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
               Your bank account must be linked to create groups and join payment sessions.
             </p>
           </div>
-        </motion.div>
+        </div>
 
         {paymentMethods.length > 0 && (
-          <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }} className="mt-6">
+          <div className="mt-6">
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Payment Methods</h2>
             <div className="space-y-3">
               {paymentMethods.map((pm) => (
@@ -256,7 +242,7 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
                 </div>
               ))}
             </div>
-          </motion.div>
+          </div>
         )}
       </div>
 
