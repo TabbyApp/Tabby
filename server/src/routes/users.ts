@@ -177,6 +177,34 @@ usersRouter.post('/payment-methods', requireAuth, async (req, res) => {
   res.status(201).json(rows[0]);
 });
 
+usersRouter.post('/device-token', requireAuth, async (req, res) => {
+  const { userId } = (req as any).user;
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+  const platform = typeof req.body?.platform === 'string' ? req.body.platform.trim() : '';
+  if (!token || !platform) {
+    return res.status(400).json({ error: 'token and platform are required' });
+  }
+
+  const { rows: existingRows } = await query<{ id: string }>(
+    'SELECT id FROM device_tokens WHERE token = $1',
+    [token]
+  );
+
+  if (existingRows.length > 0) {
+    await query(
+      'UPDATE device_tokens SET user_id = $1, platform = $2, updated_at = now() WHERE token = $3',
+      [userId, platform, token]
+    );
+    return res.json({ ok: true });
+  }
+
+  await query(
+    'INSERT INTO device_tokens (id, user_id, token, platform) VALUES ($1, $2, $3, $4)',
+    [genId(), userId, token, platform]
+  );
+  res.json({ ok: true });
+});
+
 // Notification feed: pending invites + recent group activity
 usersRouter.get('/notifications', requireAuth, async (req, res) => {
   const { userId } = (req as any).user;

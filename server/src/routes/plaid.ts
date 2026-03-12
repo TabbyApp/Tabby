@@ -126,6 +126,8 @@ plaidRouter.post('/exchange', requireAuth, async (req, res) => {
       created.push({ id: pmId, type: 'bank', last_four: mask, brand: null });
     }
 
+    await query('UPDATE users SET bank_linked = true WHERE id = $1', [userId]);
+
     res.json({ ok: true, paymentMethods: created });
   } catch (err: any) {
     const data = err?.response?.data;

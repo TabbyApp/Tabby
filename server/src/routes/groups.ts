@@ -434,6 +434,7 @@ groupsRouter.get('/:groupId', requireAuth, async (req, res) => {
     lastSettledBreakdown: lastSettledBreakdown ?? undefined,
     lastSettledItemsPerUser: lastSettledItemsPerUser ?? undefined,
     splitModePreference: row.split_mode_preference ?? 'item',
+    draftTipPercentage: row.draft_tip_percentage != null ? Number(row.draft_tip_percentage) : 15,
     pendingItemSplit: pendingItemSplit ?? undefined,
   });
 });
@@ -457,7 +458,6 @@ async function updateGroupHandler(req: any, res: any) {
   }
 
   if (draftTipPercentage !== undefined) {
-    if (!group.draft_receipt_id) return res.status(400).json({ error: 'No pending item split to update tip for' });
     const pct = Math.min(30, Math.max(0, Number(draftTipPercentage)));
     if (Number.isNaN(pct)) return res.status(400).json({ error: 'draftTipPercentage must be a number' });
     await query('UPDATE groups SET draft_tip_percentage = $1 WHERE id = $2', [Math.round(pct), groupId]);
