@@ -567,7 +567,7 @@ export default function App() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.14, ease: 'easeOut' }}
               className="absolute inset-0 w-full h-full"
-              style={{ willChange: 'opacity' }}
+              style={{ willChange: 'opacity', backfaceVisibility: 'hidden', transform: 'translateZ(0)' }}
             >
               {currentPage === 'home' && (
                 <LandingPage 

@@ -19,11 +19,7 @@ export function SettingsPage({ onNavigate, theme, onThemeChange, onLogout }: Set
   return (
     <div className="h-full min-h-0 flex flex-col bg-background">
       {/* Header */}
-      <motion.div 
-        initial={{ opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="bg-card border-b border-border px-5 py-4"
-      >
+      <div className="bg-card border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">
           <button 
             onClick={() => onNavigate('home')}
@@ -33,16 +29,11 @@ export function SettingsPage({ onNavigate, theme, onThemeChange, onLogout }: Set
           </button>
           <h1 className="text-2xl font-bold text-foreground">Settings</h1>
         </div>
-      </motion.div>
+      </div>
 
       {/* Settings List */}
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
-        <motion.div
-          initial={{ y: 6, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.12 }}
-          className="space-y-6"
-        >
+        <div className="space-y-6">
           {/* Pro Account */}
           <div>
             <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
@@ -176,7 +167,7 @@ export function SettingsPage({ onNavigate, theme, onThemeChange, onLogout }: Set
               </button>
             </div>
           </div>
-        </motion.div>
+        </div>
       </div>
 
       {/* Delete Account Modal */}

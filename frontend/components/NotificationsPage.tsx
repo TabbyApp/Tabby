@@ -1,5 +1,4 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { motion } from 'motion/react';
 import { ChevronLeft, Bell, Users, Receipt, UserPlus, Check, X } from 'lucide-react';
 import { PageType } from '../App';
 
@@ -88,11 +87,7 @@ export function NotificationsPage({ onNavigate, theme, notifications, setNotific
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="bg-card border-b border-border px-5 py-4"
-      >
+      <div className="bg-card border-b border-border px-5 py-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <button
@@ -114,7 +109,7 @@ export function NotificationsPage({ onNavigate, theme, notifications, setNotific
             {unreadCount} unread notification{unreadCount > 1 ? 's' : ''}
           </p>
         )}
-      </motion.div>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         {notifications.length === 0 ? (
@@ -126,14 +121,11 @@ export function NotificationsPage({ onNavigate, theme, notifications, setNotific
           </div>
         ) : (
           <div className="space-y-3">
-            {notifications.map((notification, index) => {
+            {notifications.map((notification) => {
               const Icon = getIcon(notification.type);
               return (
-                <motion.div
+                <div
                   key={notification.id}
-                  initial={{ x: -6, opacity: 0 }}
-                  animate={{ x: 0, opacity: 1 }}
-                  transition={{ delay: index * 0.02, duration: 0.1 }}
                   className={`w-full bg-card border border-border rounded-xl p-4 text-left ${!notification.read ? 'ring-2 ring-primary/50' : ''}`}
                   onClick={() => {
                     markAsRead(notification.id);
@@ -194,7 +186,7 @@ export function NotificationsPage({ onNavigate, theme, notifications, setNotific
                       </button>
                     )}
                   </div>
-                </motion.div>
+                </div>
               );
             })}
           </div>

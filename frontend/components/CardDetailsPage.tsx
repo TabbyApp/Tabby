@@ -1,4 +1,3 @@
-import { motion } from 'motion/react';
 import { ChevronLeft, CreditCard, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { PageType } from '../App';
@@ -71,11 +70,7 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background">
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="bg-card border-b border-border px-5 py-4"
-      >
+      <div className="bg-card border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">
           <button
             onClick={() => onNavigate('home')}
@@ -85,15 +80,10 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
           </button>
           <h1 className="text-2xl font-bold text-foreground">Card Details</h1>
         </div>
-      </motion.div>
+      </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.12 }}
-          className="mb-6"
-        >
+        <div className="mb-6">
           <div className="bg-card border border-border rounded-2xl p-6">
             <div className="flex items-start justify-between mb-8">
               <div>
@@ -131,14 +121,9 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
               <p className="font-semibold text-lg leading-tight">Apple Wallet</p>
             </div>
           </button>
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ y: 6, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.12 }}
-          className="bg-card border border-border rounded-xl p-5 mb-6"
-        >
+        <div className="bg-card border border-border rounded-xl p-5 mb-6">
           <p className="text-sm text-muted-foreground mb-2">Group Balance</p>
           <p className="text-3xl font-bold text-foreground tabular-nums mb-4">${groupTotal.toFixed(2)}</p>
           <div className="flex items-center gap-2">
@@ -153,14 +138,9 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
               {members.length} members in group
             </p>
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div
-          initial={{ y: 6, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ duration: 0.12 }}
-          className="mb-6"
-        >
+        <div className="mb-6">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
             Group Members
           </h2>
@@ -181,9 +161,9 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
               </div>
             ))}
           </div>
-        </motion.div>
+        </div>
 
-        <motion.div initial={{ y: 6, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.12 }}>
+        <div>
           <button
             onClick={() => onNavigate('groupDetail', groupId)}
             className="w-full bg-card border border-border rounded-xl p-4 flex items-center justify-between active:scale-[0.99] transition-transform"
@@ -191,7 +171,7 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
             <span className="font-medium text-foreground">View Group Details</span>
             <ChevronLeft size={20} className="rotate-180 text-muted-foreground" />
           </button>
-        </motion.div>
+        </div>
       </div>
     </div>
   );
