@@ -72,6 +72,7 @@ authRouter.post('/signup', async (req, res) => {
     })
     .json({
       accessToken,
+      refreshToken,
       expiresIn: 15 * 60,
       user: { id, email: email.toLowerCase(), name: normalizedName },
     });
@@ -112,6 +113,7 @@ authRouter.post('/login', async (req, res) => {
     })
     .json({
       accessToken,
+      refreshToken,
       expiresIn: 15 * 60,
       user: { id: user.id, email: user.email, name: user.name },
     });
@@ -145,7 +147,7 @@ authRouter.post('/refresh', async (req, res) => {
 });
 
 authRouter.post('/logout', async (req, res) => {
-  const token = req.cookies?.refreshToken;
+  const token = req.cookies?.refreshToken || req.body?.refreshToken;
   if (token) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     await query('DELETE FROM refresh_tokens WHERE token_hash = $1', [tokenHash]);
@@ -320,6 +322,7 @@ authRouter.post('/verify-otp', async (req, res) => {
     })
     .json({
       accessToken,
+      refreshToken,
       expiresIn: 15 * 60,
       user: {
         id: user.id,

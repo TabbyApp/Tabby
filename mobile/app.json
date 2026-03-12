@@ -1,0 +1,63 @@
+{
+  "expo": {
+    "name": "Tabby",
+    "slug": "tabby-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "tabby",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1020"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.tabby.mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Tabby uses your camera to scan receipts.",
+        "NSPhotoLibraryUsageDescription": "Tabby uses your photo library so you can upload receipt images.",
+        "NSUserTrackingUsageDescription": "Tabby does not use tracking, but iOS may request this for linked financial flows.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.tabby.mobile",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-sharing",
+      "expo-web-browser",
+      "expo-dev-client",
+      "expo-notifications",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "apiUrl": "http://127.0.0.1:3001/api",
+      "eas": {
+        "projectId": "replace-with-your-eas-project-id"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
+  }
+}
