@@ -10,9 +10,10 @@ import { api, assetUrl } from '../lib/api';
 interface AccountPageProps {
   onNavigate: (page: PageType, groupId?: string) => void;
   theme: 'light' | 'dark';
+  notice?: string | null;
 }
 
-export function AccountPage({ onNavigate, theme }: AccountPageProps) {
+export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
   const { user, setUser, refreshBootstrap } = useAuth();
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingPhone, setIsEditingPhone] = useState(false);
@@ -84,7 +85,7 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-full min-h-0 flex flex-col bg-background">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -101,7 +102,17 @@ export function AccountPage({ onNavigate, theme }: AccountPageProps) {
         </div>
       </motion.div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-6 pb-24">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-24">
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-5 rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-foreground"
+          >
+            {notice}
+          </motion.div>
+        )}
+
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}

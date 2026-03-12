@@ -117,7 +117,10 @@ async function request<T>(
 
   if (!res.ok) {
     const errMsg = (data as { error?: string })?.error || `Request failed: ${res.status}`;
-    throw new Error(errMsg);
+    const err = new Error(errMsg) as Error & { code?: string };
+    const code = (data as { code?: string })?.code;
+    if (code) err.code = code;
+    throw err;
   }
 
   return data;
@@ -127,7 +130,7 @@ export const api = {
   /** Single call for initial load: user + groups + virtualCards. Use after login or on app init. Pass noRefreshOn401: true for initial session check to avoid double 401. */
   bootstrap: (opts?: { noRefreshOn401?: boolean }) =>
     request<{
-      user: { id: string; email: string; name: string; phone?: string; bank_linked: boolean; paymentMethods: unknown[] };
+      user: { id: string; email: string; name: string; phone?: string; bank_linked: boolean; dateOfBirth?: string | null; onboardingCompleted?: boolean; paymentMethods: unknown[] };
       groups: { id: string; name: string; memberCount: number; cardLastFour: string | null }[];
       virtualCards: { groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[];
     }>('/bootstrap', opts ?? {}),
@@ -159,9 +162,23 @@ export const api = {
       }),
   },
   users: {
-    me: () => request<{ id: string; email: string; name: string; phone?: string; bank_linked: boolean; paymentMethods: unknown[] }>('/users/me'),
-    updateProfile: (data: { name?: string; email?: string; phone?: string }) =>
-      request<{ id: string; email: string; name: string; phone: string }>('/users/me', {
+    me: () => request<{ id: string; email: string; name: string; phone?: string; bank_linked: boolean; dateOfBirth?: string | null; onboardingCompleted?: boolean; paymentMethods: unknown[] }>('/users/me'),
+    notifications: () =>
+      request<Array<{
+        id: string;
+        type: 'invite' | 'receipt' | 'payment' | 'group';
+        title: string;
+        message: string;
+        createdAt: string;
+        read?: boolean;
+        groupId?: string;
+        groupName?: string;
+        inviterName?: string;
+        inviteToken?: string;
+        source?: 'server';
+      }>>('/users/notifications'),
+    updateProfile: (data: { name?: string; email?: string; phone?: string; dateOfBirth?: string; onboardingCompleted?: boolean }) =>
+      request<{ id: string; email: string; name: string; phone: string; dateOfBirth?: string | null; onboardingCompleted?: boolean }>('/users/me', {
         method: 'PATCH',
         body: JSON.stringify(data),
       }),
@@ -232,6 +249,17 @@ export const api = {
       request<{ groupId: string; groupName: string; cardLastFour: string | null; active: boolean; groupTotal: number }[]>(
         '/groups/virtual-cards/list'
       ),
+  },
+  invites: {
+    getByToken: (token: string) =>
+      request<{ inviteId: string; groupId: string; groupName: string; inviterName: string; inviteeEmail: string; token: string; createdAt: string }>(`/invites/${token}`),
+    accept: (token: string) =>
+      request<{ id: string; name: string; createdBy: string; createdAt: string; cardLastFour: string | null; members: { id: string; name: string; email: string }[] }>(
+        `/invites/${token}/accept`,
+        { method: 'POST' }
+      ),
+    decline: (token: string) =>
+      request<{ ok: boolean }>(`/invites/${token}`, { method: 'DELETE' }),
   },
   receipts: {
     create: (groupId: string) =>

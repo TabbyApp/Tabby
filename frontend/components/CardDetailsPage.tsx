@@ -70,7 +70,7 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
   const { name, cardLastFour, groupTotal, members } = groupData;
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-full min-h-0 flex flex-col bg-background">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -87,7 +87,7 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
         </div>
       </motion.div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}

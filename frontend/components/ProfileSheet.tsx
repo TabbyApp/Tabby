@@ -1,3 +1,4 @@
+import { motion } from 'motion/react';
 import { User, Settings, ChevronRight, X, Wallet } from 'lucide-react';
 import { useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
@@ -22,12 +23,31 @@ export function ProfileSheet({ onClose, onNavigateToAccount, onNavigateToSetting
 
   return (
     <>
-      <div
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
         className="fixed inset-0 bg-black/40 z-40 animate-in fade-in duration-200"
         onClick={onClose}
       />
 
-      <div className="fixed bottom-0 left-0 right-0 z-50 animate-in slide-in-from-bottom duration-300">
+      <motion.div
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+        drag="y"
+        dragDirectionLock
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.18 }}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > 120 || info.velocity.y > 700) {
+            onClose();
+          }
+        }}
+        className="fixed bottom-0 left-0 right-0 z-50"
+        style={{ touchAction: 'pan-y' }}
+      >
         <div className="mx-auto max-w-[430px] bg-card rounded-t-[20px] overflow-hidden">
           <div className="pt-3 pb-2 flex justify-center">
             <div className="w-9 h-1 bg-muted-foreground/30 rounded-full" />
@@ -102,7 +122,7 @@ export function ProfileSheet({ onClose, onNavigateToAccount, onNavigateToSetting
           {/* Safe area padding for home indicator */}
           <div className="h-8" />
         </div>
-      </div>
+      </motion.div>
     </>
   );
 }

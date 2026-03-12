@@ -98,6 +98,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   
   const [splitMode, setSplitMode] = useState<'even' | 'item'>(receiptData ? 'item' : 'even');
   const [tipPercentage, setTipPercentage] = useState(15);
+  const [isAdjustingTip, setIsAdjustingTip] = useState(false);
   const [pendingItemSplit, setPendingItemSplit] = useState<{ receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } | null>(null);
   const cachedForInit = groupId ? getCachedGroupDetail(groupId) : null;
   const [serverSplitModePreference, setServerSplitModePreference] = useState<string | null>(cachedForInit?.splitModePreference ?? null);
@@ -123,13 +124,6 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       setSplitMode('item');
     }
   }, [receiptData]);
-
-  // Sync tip % from server when pendingItemSplit changes (members see host's slider in real time)
-  useEffect(() => {
-    if (pendingItemSplit?.draftTipPercentage != null) {
-      setTipPercentage(pendingItemSplit.draftTipPercentage);
-    }
-  }, [pendingItemSplit?.draftTipPercentage]);
 
   // Sync splitMode from server preference (so all members see host's choice)
   useEffect(() => {
@@ -178,6 +172,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
 
   // Track which groupId we've loaded for, to avoid double-fetching
   const loadedGroupRef = useRef<string | null>(null);
+  const draftTipUpdateTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!groupId) return;
@@ -200,7 +195,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       setServerSplitModePreference(freshCache.splitModePreference ?? null);
       const cachedPending = (freshCache as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null;
       setPendingItemSplit(cachedPending);
-      if (cachedPending?.draftTipPercentage != null) {
+      if (cachedPending?.draftTipPercentage != null && !(isCreator && isAdjustingTip)) {
         setTipPercentage(cachedPending.draftTipPercentage);
       }
       const latestCached = freshCache.receipts.find((r: any) => r.total != null);
@@ -232,7 +227,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
         const nextPending = (groupData as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null;
         setPendingItemSplit(nextPending);
-        if (nextPending?.draftTipPercentage != null) {
+        if (nextPending?.draftTipPercentage != null && !(isCreator && isAdjustingTip)) {
           setTipPercentage(nextPending.draftTipPercentage);
         }
       }
@@ -299,7 +294,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
         setServerSplitModePreference((groupData as { splitModePreference?: string }).splitModePreference ?? null);
         const nextPending = (groupData as { pendingItemSplit?: { receiptId: string; receiptTotal: number; myAmount: number; draftTipPercentage: number } }).pendingItemSplit ?? null;
         setPendingItemSplit(nextPending);
-        if (nextPending?.draftTipPercentage != null) {
+        if (nextPending?.draftTipPercentage != null && !(isCreator && isAdjustingTip)) {
           setTipPercentage(nextPending.draftTipPercentage);
         }
       }
@@ -420,6 +415,43 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const splitModeLocked = hasPendingReceipt && !isCreator;
   const effectiveSplitMode = splitModeLocked ? 'item' : splitMode;
 
+  useEffect(() => {
+    if (!isCreator && pendingItemSplit?.draftTipPercentage != null) {
+      setTipPercentage(pendingItemSplit.draftTipPercentage);
+    }
+  }, [pendingItemSplit?.draftTipPercentage, isCreator]);
+
+  const flushDraftTipUpdate = useCallback((nextTip: number) => {
+    if (!groupId) return;
+    if (draftTipUpdateTimeoutRef.current != null) {
+      window.clearTimeout(draftTipUpdateTimeoutRef.current);
+      draftTipUpdateTimeoutRef.current = null;
+    }
+    invalidateGroupCache(groupId);
+    api.groups.updateDraftTip(groupId, nextTip).catch(() => {});
+  }, [groupId]);
+
+  const queueDraftTipUpdate = useCallback((nextTip: number) => {
+    setTipPercentage(nextTip);
+    if (!groupId) return;
+    if (draftTipUpdateTimeoutRef.current != null) {
+      window.clearTimeout(draftTipUpdateTimeoutRef.current);
+    }
+    draftTipUpdateTimeoutRef.current = window.setTimeout(() => {
+      draftTipUpdateTimeoutRef.current = null;
+      invalidateGroupCache(groupId);
+      api.groups.updateDraftTip(groupId, nextTip).catch(() => {});
+    }, 120);
+  }, [groupId]);
+
+  useEffect(() => {
+    return () => {
+      if (draftTipUpdateTimeoutRef.current != null) {
+        window.clearTimeout(draftTipUpdateTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Post-purchase view-only: when transaction was settled, show confirmation (no add receipt)
   const isViewOnly = !!lastSettledAt;
 
@@ -442,11 +474,14 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const visibleAvatars = memberAvatars.slice(0, 3);
   const remainingCount = Math.max(0, memberAvatars.length - 3);
 
-  const billBeforeTipForYou = effectiveSplitMode === 'even' ? receiptTotal : yourItemsTotal;
+  const evenSplitBillBeforeTip = receiptTotal > 0
+    ? receiptTotal
+    : ((evenSplitSubtotal ?? 0) + (evenSplitTax ?? 0));
+  const billBeforeTipForYou = effectiveSplitMode === 'even' ? evenSplitBillBeforeTip : yourItemsTotal;
   const tipAmount = billBeforeTipForYou * tipPercentage / 100;
   
   const totalWithTip = effectiveSplitMode === 'even'
-    ? receiptTotal + tipAmount
+    ? evenSplitBillBeforeTip + tipAmount
     : yourItemsTotal + tipAmount;
   const yourShare = effectiveSplitMode === 'even'
     ? (memberAvatars.length > 0 ? totalWithTip / memberAvatars.length : totalWithTip)
@@ -535,19 +570,22 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
     try {
       // Create a transaction on the backend. For item split, link the existing completed receipt.
       const splitModeApi = effectiveSplitMode === 'even' ? 'EVEN_SPLIT' : 'FULL_CONTROL';
-      const receiptIdForTx = effectiveSplitMode === 'item' ? receiptForItemSplit?.id : undefined;
+      const receiptIdForTx = receiptForItemSplit?.status === 'completed' ? receiptForItemSplit.id : undefined;
       const tx = await api.transactions.create(groupId, splitModeApi, receiptIdForTx);
       
       // Set tip: host's percentage (e.g. 15%) applies to the full bill, so everyone pays 15% of their amount
-      const fullBillBeforeTip = receiptTotal > 0 ? receiptTotal : (effectiveSplitMode === 'item' ? (receiptTotalFromReceipt ?? 0) : 0);
+      const fullBillBeforeTip = effectiveSplitMode === 'even'
+        ? evenSplitBillBeforeTip
+        : (receiptTotal > 0 ? receiptTotal : (receiptTotalFromReceipt ?? 0));
       if (tipPercentage > 0 && fullBillBeforeTip > 0) {
         const totalTipAmount = fullBillBeforeTip * tipPercentage / 100;
         await api.transactions.setTip(tx.id, totalTipAmount);
       }
       
-      // If even split with a known subtotal, set it
-      if (effectiveSplitMode === 'even' && receiptTotal > 0) {
-        await api.transactions.setSubtotal(tx.id, receiptTotal).catch(() => {});
+      // For even split, preserve the true item subtotal so tax stays separate from pre-tax totals.
+      const evenSubtotalForTx = evenSplitSubtotal ?? null;
+      if (effectiveSplitMode === 'even' && evenSubtotalForTx != null && evenSubtotalForTx > 0) {
+        await api.transactions.setSubtotal(tx.id, evenSubtotalForTx).catch(() => {});
       }
       
       // Finalize the transaction
@@ -589,7 +627,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-full min-h-0 flex flex-col bg-background">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -711,7 +749,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       </motion.div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-5 py-5 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         {/* Post-purchase confirmation (view-only) */}
         {isViewOnly && (
           <motion.div
@@ -937,7 +975,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                 </button>
               )}
             </motion.div>
-          ) : hasReceiptForItemSplit ? (
+          ) : effectiveSplitMode === 'item' && hasReceiptForItemSplit ? (
             /* Item split block when we have an item-split receipt (everyone sees same summary type; tip syncs from host) */
             <motion.div
               key="item"
@@ -1020,11 +1058,8 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                             <button
                               key={tip}
                               onClick={() => {
-                                setTipPercentage(tip);
-                                if (groupId && pendingItemSplit) {
-                                  invalidateGroupCache(groupId);
-                                  api.groups.updateDraftTip(groupId, tip).catch(() => {});
-                                }
+                                setIsAdjustingTip(false);
+                                flushDraftTipUpdate(tip);
                               }}
                               className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
                                 tipPercentage === tip
@@ -1041,11 +1076,19 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                             type="range" min="0" max="30" value={tipPercentage}
                             onChange={(e) => {
                               const v = parseInt(e.target.value);
-                              setTipPercentage(v);
-                              if (groupId && pendingItemSplit) {
-                                invalidateGroupCache(groupId);
-                                api.groups.updateDraftTip(groupId, v).catch(() => {});
-                              }
+                              queueDraftTipUpdate(v);
+                            }}
+                            onMouseDown={() => setIsAdjustingTip(true)}
+                            onTouchStart={() => setIsAdjustingTip(true)}
+                            onMouseUp={(e) => {
+                              const v = parseInt((e.target as HTMLInputElement).value);
+                              setIsAdjustingTip(false);
+                              flushDraftTipUpdate(v);
+                            }}
+                            onTouchEnd={(e) => {
+                              const v = parseInt((e.target as HTMLInputElement).value);
+                              setIsAdjustingTip(false);
+                              flushDraftTipUpdate(v);
                             }}
                             className="w-full h-2 rounded-full appearance-none cursor-pointer"
                             style={{
@@ -1201,35 +1244,61 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
                         {tipPercentage}%
                       </span>
                     </div>
-                    <div className="grid grid-cols-4 gap-2 mb-4">
-                      {[10, 15, 18, 20].map((tip) => (
-                        <button
-                          key={tip}
-                          onClick={() => setTipPercentage(tip)}
-                          className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
-                            tipPercentage === tip
-                              ? 'bg-primary text-primary-foreground'
-                              : `bg-secondary text-muted-foreground`
-                          }`}
-                        >
-                          {tip}%
-                        </button>
-                      ))}
-                    </div>
-                    <div className="relative">
-                      <input
-                        type="range" min="0" max="30" value={tipPercentage}
-                        onChange={(e) => setTipPercentage(parseInt(e.target.value))}
-                        className="w-full h-2 rounded-full appearance-none cursor-pointer"
-                        style={{
-                          background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${(tipPercentage / 30) * 100}%, var(--muted) ${(tipPercentage / 30) * 100}%, var(--muted) 100%)`
-                        }}
-                      />
-                      <div className="flex justify-between mt-2">
-                        <span className={`text-xs text-muted-foreground`}>0%</span>
-                        <span className={`text-xs text-muted-foreground`}>30%</span>
-                      </div>
-                    </div>
+                    {isCreator ? (
+                      <>
+                        <div className="grid grid-cols-4 gap-2 mb-4">
+                          {[10, 15, 18, 20].map((tip) => (
+                            <button
+                              key={tip}
+                              onClick={() => {
+                                setIsAdjustingTip(false);
+                                flushDraftTipUpdate(tip);
+                              }}
+                              className={`py-2.5 rounded-[12px] font-semibold text-sm transition-all ${
+                                tipPercentage === tip
+                                  ? 'bg-primary text-primary-foreground'
+                                  : `bg-secondary text-muted-foreground`
+                              }`}
+                            >
+                              {tip}%
+                            </button>
+                          ))}
+                        </div>
+                        <div className="relative">
+                          <input
+                            type="range" min="0" max="30" value={tipPercentage}
+                            onChange={(e) => {
+                              const v = parseInt(e.target.value);
+                              queueDraftTipUpdate(v);
+                            }}
+                            onMouseDown={() => setIsAdjustingTip(true)}
+                            onTouchStart={() => setIsAdjustingTip(true)}
+                            onMouseUp={(e) => {
+                              const v = parseInt((e.target as HTMLInputElement).value);
+                              setIsAdjustingTip(false);
+                              flushDraftTipUpdate(v);
+                            }}
+                            onTouchEnd={(e) => {
+                              const v = parseInt((e.target as HTMLInputElement).value);
+                              setIsAdjustingTip(false);
+                              flushDraftTipUpdate(v);
+                            }}
+                            className="w-full h-2 rounded-full appearance-none cursor-pointer"
+                            style={{
+                              background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${(tipPercentage / 30) * 100}%, var(--muted) ${(tipPercentage / 30) * 100}%, var(--muted) 100%)`
+                            }}
+                          />
+                          <div className="flex justify-between mt-2">
+                            <span className={`text-xs text-muted-foreground`}>0%</span>
+                            <span className={`text-xs text-muted-foreground`}>30%</span>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <p className={`text-sm text-muted-foreground`}>
+                        Host is setting the tip. Your total updates above.
+                      </p>
+                    )}
                   </motion.div>
 
                   {/* Complete Payment - creator only */}

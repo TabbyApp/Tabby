@@ -12,9 +12,9 @@ interface LandingPageProps {
   groups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
   recentGroups: Array<{ id: string; name: string; members: number; balance: number; color: string; createdBy: string }>;
   unreadNotificationCount: number;
-  pendingInvites: Array<{ id: number; groupName: string; inviterName: string; members: number }>;
-  acceptInvite: (inviteId: number) => void;
-  declineInvite: (inviteId: number) => void;
+  pendingInvites: Array<{ id: string; groupName: string; inviterName: string; members: number }>;
+  acceptInvite: (inviteId: string) => void | Promise<void>;
+  declineInvite: (inviteId: string) => void | Promise<void>;
   preloadedCardInfo?: { lastFour: string; balance: number; groupId?: string } | null;
 }
 
@@ -239,7 +239,9 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
                     <div className="flex-1 text-left">
                       <h3 className="font-semibold text-[15px] text-foreground mb-1">{invite.groupName}</h3>
                       <p className="text-sm text-muted-foreground">Invited by {invite.inviterName}</p>
-                      <p className="text-xs text-muted-foreground mt-1">{invite.members} members</p>
+                      {invite.members > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1">{invite.members} members</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex gap-2">

@@ -14,7 +14,7 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [otpSent, setOtpSent] = useState(false);
@@ -32,14 +32,17 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
           await api.auth.sendOtp(phone.replace(/\D/g, '').slice(-10));
           setOtpSent(true);
         } else {
-          await loginWithPhone(phone.replace(/\D/g, '').slice(-10), otpCode, !isLogin ? name : undefined);
+          await loginWithPhone(phone.replace(/\D/g, '').slice(-10), otpCode);
           onAuthenticate();
         }
       } else {
         if (isLogin) {
           await login(email, password);
         } else {
-          await signup(email, password, name);
+          if (password !== confirmPassword) {
+            throw new Error('Passwords do not match');
+          }
+          await signup(email, password, '');
         }
         onAuthenticate();
       }
@@ -109,21 +112,11 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
         <div className="space-y-3 mb-4">
           {authMode === 'email' ? (
             <>
-              {!isLogin && (
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-card border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                  placeholder="Full Name"
-                  required
-                />
-              )}
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3.5 bg-card border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                className="w-full px-4 py-3.5 bg-secondary border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 placeholder="Email"
                 required
               />
@@ -131,27 +124,28 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3.5 bg-card border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                className="w-full px-4 py-3.5 bg-secondary border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 placeholder="Password"
                 required
               />
+              {!isLogin && (
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full px-4 py-3.5 bg-secondary border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  placeholder="Confirm Password"
+                  required
+                />
+              )}
             </>
           ) : (
             <>
-              {!isLogin && !otpSent && (
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-card border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
-                  placeholder="Full Name"
-                />
-              )}
               <input
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-4 py-3.5 bg-card border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60"
+                className="w-full px-4 py-3.5 bg-secondary border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-60"
                 placeholder="Phone number"
                 required={authMode === 'phone'}
                 disabled={otpSent}
@@ -161,7 +155,7 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
                   type="text"
                   value={otpCode}
                   onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  className="w-full px-4 py-3.5 bg-card border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                  className="w-full px-4 py-3.5 bg-secondary border border-border rounded-xl text-[16px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                   placeholder="Enter 6-digit code"
                   maxLength={6}
                 />
@@ -181,10 +175,15 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
         <div className="mt-auto space-y-3">
           <button
             type="submit"
-            disabled={loading || (authMode === 'phone' && !phone.trim()) || (authMode === 'phone' && otpSent && otpCode.length < 4)}
+            disabled={
+              loading ||
+              (authMode === 'phone' && !phone.trim()) ||
+              (authMode === 'phone' && otpSent && otpCode.length < 4) ||
+              (authMode === 'email' && !isLogin && (!password || !confirmPassword))
+            }
             className="w-full bg-primary text-primary-foreground py-3.5 rounded-xl text-[17px] font-semibold active:scale-[0.98] transition-transform disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {loading ? 'Please wait...' : authMode === 'phone' ? (otpSent ? 'Verify & Sign In' : 'Send Code') : (isLogin ? 'Log In' : 'Sign Up')}
+            {loading ? 'Please wait...' : authMode === 'phone' ? (otpSent ? (isLogin ? 'Verify & Sign In' : 'Verify & Sign Up') : 'Send Code') : (isLogin ? 'Log In' : 'Sign Up')}
           </button>
 
           <button
@@ -197,6 +196,7 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
                 setOtpSent(false);
                 setOtpCode('');
               }
+              setConfirmPassword('');
               setError('');
             }}
             className="w-full text-[15px] text-muted-foreground font-medium py-2"

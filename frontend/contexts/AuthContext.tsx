@@ -5,6 +5,8 @@ export type PaymentMethod = { id: string; type: string; last_four: string; brand
 type User = {
   id: string; email: string; name: string;
   bank_linked?: boolean;
+  dateOfBirth?: string | null;
+  onboardingCompleted?: boolean;
   phone?: string;
   avatarUrl?: string | null;
   paymentMethods?: PaymentMethod[];
@@ -22,7 +24,7 @@ type AuthContextValue = {
   signup: (email: string, password: string, name: string) => Promise<void>;
   loginWithPhone: (phone: string, code: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
-  setUser: (u: User) => void;
+  setUser: (u: Partial<NonNullable<User>>) => void;
   refreshBootstrap: () => Promise<void>;
 };
 
@@ -34,8 +36,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [virtualCards, setVirtualCards] = useState<BootstrapVirtualCard[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const setUser = useCallback((u: User) => {
-    setUserState(u);
+  const setUser = useCallback((u: Partial<NonNullable<User>>) => {
+    setUserState((prev) => (prev ? { ...prev, ...u } : (u as NonNullable<User>)));
   }, []);
 
   const applyBootstrap = useCallback((data: Awaited<ReturnType<typeof api.bootstrap>>) => {
@@ -45,6 +47,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: data.user.email,
       name: data.user.name,
       bank_linked: data.user.bank_linked,
+      dateOfBirth: (data.user as { dateOfBirth?: string | null }).dateOfBirth ?? null,
+      onboardingCompleted: !!(data.user as { onboardingCompleted?: boolean }).onboardingCompleted,
       phone: data.user.phone ?? '',
       avatarUrl: (data.user as { avatarUrl?: string }).avatarUrl ?? null,
       paymentMethods: pm as PaymentMethod[],

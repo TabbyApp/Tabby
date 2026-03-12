@@ -32,7 +32,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
   const displayGroups = activeTab === 'active' ? filteredGroups : filteredRecentGroups;
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-full min-h-0 flex flex-col bg-background">
       <motion.div
         initial={{ y: -10, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -80,7 +80,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
         </div>
       </motion.div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6 pb-24">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 pb-24">
         {displayGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full py-16">
             <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-4">
