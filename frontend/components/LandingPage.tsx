@@ -32,7 +32,7 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
   const totalBalance = cardInfo ? cardInfo.balance : groups.reduce((sum, g) => sum + g.balance, 0);
 
   return (
-    <div className="h-screen flex flex-col bg-background overflow-hidden">
+    <div className="h-full min-h-0 flex flex-col bg-background overflow-hidden">
       <div className="px-6 pt-8 pb-6">
         <div className="flex items-center justify-between">
           <TabbyWordmark />
@@ -50,7 +50,7 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 pb-28">
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         {/* Featured Card - show when we have card info or groups */}
         {(cardInfo || groups.length > 0) && (
           <div className="mb-10">

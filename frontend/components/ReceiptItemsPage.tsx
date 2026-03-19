@@ -359,7 +359,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
     };
 
     return (
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="h-full min-h-0 flex flex-col bg-background overflow-hidden">
         <div className="bg-card border-border border-b px-5 py-4">
           <div className="flex items-center gap-3 mb-3">
             <button
@@ -393,7 +393,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 space-y-4">
           {reviewReceipt.merchantName != null && (
             <div>
               <label className={`block text-xs font-medium mb-1 text-muted-foreground`}>Merchant</label>
@@ -505,7 +505,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
           </div>
         </div>
 
-        <div className={`bg-card border-border border-t px-5 py-4 flex gap-2`}>
+        <div className={`bg-card border-border border-t px-5 py-4 flex gap-2 flex-shrink-0`}>
           {receiptStatus === 'FAILED' && (
             <button
               type="button"
@@ -531,7 +531,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-full min-h-0 flex flex-col bg-background overflow-hidden">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -615,7 +615,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
         </div>
       </motion.div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-5">
+      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5">
         {loading ? (
           <p className="text-center mt-8 text-muted-foreground">Loading receipt items...</p>
         ) : items.length === 0 ? (
@@ -726,7 +726,7 @@ export function ReceiptItemsPage({ onNavigate, theme, setReceiptData, setItemSpl
         )}
       </div>
 
-      <div className="bg-card border-border border-t px-5 py-4">
+      <div className="bg-card border-border border-t px-5 py-4 flex-shrink-0">
         <div className="rounded-2xl bg-success/20 border border-success/30 p-4 mb-4">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-foreground">
