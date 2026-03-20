@@ -1,8 +1,6 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, UserPlus, X, Check } from 'lucide-react';
 import { useState } from 'react';
-import { BottomNavigation } from './BottomNavigation';
-import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
 import { api } from '../lib/api';
 import { invalidateGroupCache } from '../lib/groupCache';
@@ -20,7 +18,6 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
   const [step, setStep] = useState<'create' | 'success'>('create');
   const [groupLink, setGroupLink] = useState('');
   const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
-  const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
@@ -197,10 +194,6 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
         </motion.div>
       </div>
 
-      <BottomNavigation currentPage="createGroup" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
-      {showProfileSheet && (
-        <ProfileSheet onClose={() => setShowProfileSheet(false)} onNavigateToAccount={() => onNavigate('account')} onNavigateToSettings={() => onNavigate('settings')} onNavigateToWallet={() => onNavigate('wallet')} theme={theme} />
-      )}
     </div>
   );
 }

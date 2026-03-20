@@ -1,7 +1,5 @@
 import { ChevronLeft, Users, Plus, Search, Archive } from 'lucide-react';
 import { useState } from 'react';
-import { BottomNavigation } from './BottomNavigation';
-import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
 
 interface GroupsPageProps {
@@ -18,7 +16,6 @@ interface GroupsPageProps {
 export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountType }: GroupsPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'active' | 'recent'>('active');
-  const [showProfileSheet, setShowProfileSheet] = useState(false);
 
   const filteredGroups = groups.filter(group =>
     group.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -75,7 +72,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 pb-6">
         {displayGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full py-16">
             <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-4">
@@ -161,16 +158,6 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
         )}
       </div>
 
-      <BottomNavigation currentPage="groups" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
-      {showProfileSheet && (
-        <ProfileSheet 
-          onClose={() => setShowProfileSheet(false)} 
-          onNavigateToAccount={() => onNavigate('account')}
-          onNavigateToSettings={() => onNavigate('settings')}
-          onNavigateToWallet={() => onNavigate('wallet')}
-          theme={theme}
-        />
-      )}
     </div>
   );
 }

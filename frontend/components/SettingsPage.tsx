@@ -1,8 +1,6 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, Bell, Lock, HelpCircle, Trash2, LogOut, Crown, Palette } from 'lucide-react';
 import { useState } from 'react';
-import { BottomNavigation } from './BottomNavigation';
-import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
 
 interface SettingsPageProps {
@@ -14,7 +12,6 @@ interface SettingsPageProps {
 
 export function SettingsPage({ onNavigate, theme, onThemeChange, onLogout }: SettingsPageProps) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showProfileSheet, setShowProfileSheet] = useState(false);
 
   return (
     <div className="h-full min-h-0 flex flex-col bg-background">
@@ -32,7 +29,7 @@ export function SettingsPage({ onNavigate, theme, onThemeChange, onLogout }: Set
       </div>
 
       {/* Settings List */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-6">
         <div className="space-y-6">
           {/* Pro Account */}
           <div>
@@ -208,24 +205,6 @@ export function SettingsPage({ onNavigate, theme, onThemeChange, onLogout }: Set
         </>
       )}
 
-      {/* Bottom Navigation */}
-      <BottomNavigation
-        currentPage="settings"
-        onNavigate={onNavigate}
-        onProfileClick={() => setShowProfileSheet(true)}
-        theme={theme}
-      />
-
-      {/* Profile Sheet */}
-      {showProfileSheet && (
-        <ProfileSheet 
-          onClose={() => setShowProfileSheet(false)} 
-          onNavigateToAccount={() => onNavigate('account')}
-          onNavigateToSettings={() => onNavigate('settings')}
-          onNavigateToWallet={() => onNavigate('wallet')}
-          theme={theme}
-        />
-      )}
     </div>
   );
 }

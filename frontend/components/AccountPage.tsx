@@ -1,7 +1,5 @@
 import { ChevronLeft, User, Mail, Phone, CreditCard, MapPin, Building2, Edit2, Check, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { BottomNavigation } from './BottomNavigation';
-import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
 import { useAuth } from '../contexts/AuthContext';
 import { api, assetUrl } from '../lib/api';
@@ -22,7 +20,6 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
   const [tempPhone, setTempPhone] = useState(user?.phone ?? '');
   const bankLinked = !!user?.bank_linked;
   const paymentMethods = user?.paymentMethods ?? [];
-  const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [linkingBank, setLinkingBank] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const avatarUrl = (user as { avatarUrl?: string | null })?.avatarUrl ?? null;
@@ -97,7 +94,7 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-6">
         {notice && (
           <div className="mb-5 rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-foreground">
             {notice}
@@ -246,10 +243,6 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
         )}
       </div>
 
-      <BottomNavigation currentPage="account" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
-      {showProfileSheet && (
-        <ProfileSheet onClose={() => setShowProfileSheet(false)} onNavigateToAccount={() => onNavigate('account')} onNavigateToSettings={() => onNavigate('settings')} onNavigateToWallet={() => onNavigate('wallet')} theme={theme} />
-      )}
     </div>
   );
 }

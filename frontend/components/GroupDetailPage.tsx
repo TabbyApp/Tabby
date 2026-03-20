@@ -2,8 +2,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, Users, Receipt, Trash2, UserMinus, LogOut, Plus, MoreVertical, UserPlus, DollarSign, Check, Copy, Link2, CreditCard } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { PageType } from '../App';
-import { BottomNavigation } from './BottomNavigation';
-import { ProfileSheet } from './ProfileSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useReceiptClaimsRealtime } from '../hooks/useReceiptClaimsRealtime';
@@ -92,7 +90,6 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
   const [showRemoveMemberModal, setShowRemoveMemberModal] = useState(false);
   const [showInviteSheet, setShowInviteSheet] = useState(false);
   const [selectedMember, setSelectedMember] = useState<any>(null);
-  const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showMembersDropdown, setShowMembersDropdown] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   
@@ -749,7 +746,7 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       </motion.div>
 
       {/* Content */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 pb-6">
         {/* Post-purchase confirmation (view-only) */}
         {isViewOnly && (
           <motion.div
@@ -1405,19 +1402,6 @@ export function GroupDetailPage({ onNavigate, theme, groupId, groups, deleteGrou
       </div>
 
       {/* Bottom Navigation */}
-      <BottomNavigation currentPage="groupDetail" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
-
-      {/* Profile Sheet */}
-      {showProfileSheet && (
-        <ProfileSheet 
-          onClose={() => setShowProfileSheet(false)} 
-          onNavigateToAccount={() => onNavigate('account')}
-          onNavigateToSettings={() => onNavigate('settings')}
-          onNavigateToWallet={() => onNavigate('wallet')}
-          theme={theme}
-        />
-      )}
-
       {/* Invite Sheet */}
       <AnimatePresence initial={false}>
         {showInviteSheet && (

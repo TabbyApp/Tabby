@@ -1,8 +1,5 @@
-import { useState } from 'react';
 import { CreditCard, Users, ArrowRight, Bell } from 'lucide-react';
-import { ProfileSheet } from './ProfileSheet';
 import { TabbyWordmark } from './TabbyLogo';
-import { BottomNavigation } from './BottomNavigation';
 import { PageType } from '../App';
 
 interface LandingPageProps {
@@ -18,7 +15,6 @@ interface LandingPageProps {
 }
 
 export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unreadNotificationCount, pendingInvites, acceptInvite, declineInvite, preloadedCardInfo }: LandingPageProps) {
-  const [showProfileSheet, setShowProfileSheet] = useState(false);
   const cardInfo = preloadedCardInfo ?? null;
 
   const activeGroups = groups.slice(0, 3).map(group => ({
@@ -50,7 +46,7 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="flex-1 min-h-0 overflow-y-auto px-6 pb-6">
         {/* Featured Card - show when we have card info or groups */}
         {(cardInfo || groups.length > 0) && (
           <div className="mb-10">
@@ -230,17 +226,6 @@ export function LandingPage({ onNavigate, theme, groups, recentGroups = [], unre
         )}
       </div>
 
-      {showProfileSheet && (
-        <ProfileSheet
-          onClose={() => setShowProfileSheet(false)}
-          onNavigateToAccount={() => onNavigate('account')}
-          onNavigateToSettings={() => onNavigate('settings')}
-          onNavigateToWallet={() => onNavigate('wallet')}
-          theme={theme}
-        />
-      )}
-
-      <BottomNavigation currentPage="home" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
     </div>
   );
 }

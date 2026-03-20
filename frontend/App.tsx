@@ -25,6 +25,8 @@ import { ForgotPasswordPage } from './components/ForgotPasswordPage';
 import { AcceptInvitePage } from './components/AcceptInvitePage';
 import { ProAccountPage } from './components/ProAccountPage';
 import { AccountSetupPage } from './components/AccountSetupPage';
+import { BottomNavigation } from './components/BottomNavigation';
+import { ProfileSheet } from './components/ProfileSheet';
 import { useAuth } from './contexts/AuthContext';
 import { SocketProvider } from './contexts/SocketContext';
 import { api } from './lib/api';
@@ -92,6 +94,7 @@ export default function App() {
   const [initialDataLoaded, setInitialDataLoaded] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [currentPage, setCurrentPage] = useState<PageType>('home');
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [themePreference, setThemePreference] = useState<'light' | 'dark' | 'system'>('system');
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [pageHistory, setPageHistory] = useState<PageType[]>([]);
@@ -533,7 +536,7 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] min-h-[100dvh] bg-background overflow-hidden">
-      <div className="mx-auto max-w-[430px] h-full bg-background relative overflow-hidden pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="mx-auto max-w-[430px] h-full bg-background flex flex-col overflow-hidden pt-[env(safe-area-inset-top,0px)]">
         {showSplash ? (
           <SplashScreen
             onComplete={() => setSplashAnimDone(true)}
@@ -558,7 +561,8 @@ export default function App() {
             onRemovedFromGroup={handleRemovedFromGroup}
             onGroupDeleted={handleGroupDeleted}
           >
-          <div className="relative h-full min-h-0">
+          <div className="flex flex-col flex-1 min-h-0">
+          <div className="flex-1 relative min-h-0">
           <AnimatePresence initial={false} mode="sync">
             <motion.div
               key={currentPage}
@@ -632,6 +636,23 @@ export default function App() {
               )}
             </motion.div>
           </AnimatePresence>
+          </div>
+          {(['home','groups','activity','account','settings','createGroup','groupDetail'] as PageType[]).includes(currentPage) && (
+            <BottomNavigation
+              currentPage={currentPage}
+              onNavigate={handleNavigate}
+              onProfileClick={() => setShowProfileSheet(true)}
+              theme={theme}
+            />
+          )}
+          {showProfileSheet && (
+            <ProfileSheet
+              onClose={() => setShowProfileSheet(false)}
+              onNavigateToAccount={() => handleNavigate('account')}
+              onNavigateToSettings={() => handleNavigate('settings')}
+              onNavigateToWallet={() => handleNavigate('wallet')}
+            />
+          )}
           </div>
           </SocketProvider>
         )}

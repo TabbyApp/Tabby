@@ -1,8 +1,6 @@
 import { motion } from 'motion/react';
 import { ChevronLeft, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
-import { BottomNavigation } from './BottomNavigation';
-import { ProfileSheet } from './ProfileSheet';
 import { PageType } from '../App';
 import { useSocket } from '../contexts/SocketContext';
 import { api } from '../lib/api';
@@ -13,7 +11,6 @@ interface ActivityPageProps {
 }
 
 export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
-  const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [transactions, setTransactions] = useState<
     { id: string; description: string; group: string; amount: number; date: string; type: 'paid' | 'received' }[]
   >([]);
@@ -88,7 +85,7 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
         </div>
       </motion.div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="flex-1 overflow-y-auto px-5 py-4 pb-6">
         {loading ? (
           <div className="space-y-3 animate-pulse">
             {[1, 2, 3].map(i => (
@@ -142,10 +139,6 @@ export function ActivityPage({ onNavigate, theme }: ActivityPageProps) {
         )}
       </div>
 
-      <BottomNavigation currentPage="activity" onNavigate={onNavigate} onProfileClick={() => setShowProfileSheet(true)} theme={theme} />
-      {showProfileSheet && (
-        <ProfileSheet onClose={() => setShowProfileSheet(false)} onNavigateToAccount={() => onNavigate('account')} onNavigateToSettings={() => onNavigate('settings')} onNavigateToWallet={() => onNavigate('wallet')} theme={theme} />
-      )}
     </div>
   );
 }

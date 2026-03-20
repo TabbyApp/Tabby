@@ -58,7 +58,7 @@ export function LoginSignup({ onAuthenticate, onForgotPassword }: LoginSignupPro
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4 }}
-      className="min-h-screen flex flex-col bg-background px-6 py-12"
+      className="h-full overflow-y-auto flex flex-col bg-background px-6 py-12"
     >
       <div className="text-center mb-10">
         <motion.div

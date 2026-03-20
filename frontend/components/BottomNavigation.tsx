@@ -10,7 +10,7 @@ interface BottomNavigationProps {
 
 export function BottomNavigation({ currentPage, onNavigate, onProfileClick, theme }: BottomNavigationProps) {
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-card/95 border-t border-border z-20">
+    <div className="bg-card border-t border-border z-20 shrink-0">
       <div className="mx-auto max-w-[430px] px-6 pt-2 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
         <div className="flex items-center justify-around">
           <button
