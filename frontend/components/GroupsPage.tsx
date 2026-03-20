@@ -75,7 +75,7 @@ export function GroupsPage({ onNavigate, theme, groups, recentGroups, accountTyp
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 pb-24">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         {displayGroups.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full py-16">
             <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center mb-4">

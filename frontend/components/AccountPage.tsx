@@ -84,7 +84,7 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
   };
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-background">
+    <div className="h-full min-h-0 flex flex-col bg-background overflow-hidden">
       <div className="bg-card border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">
           <button
@@ -97,7 +97,7 @@ export function AccountPage({ onNavigate, theme, notice }: AccountPageProps) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-24">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
         {notice && (
           <div className="mb-5 rounded-2xl border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-foreground">
             {notice}
