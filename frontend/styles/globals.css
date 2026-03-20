@@ -214,5 +214,11 @@ html {
 
 html, body {
   background-color: var(--background);
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  overflow: hidden;
 }
