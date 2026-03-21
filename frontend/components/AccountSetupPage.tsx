@@ -110,8 +110,8 @@ export function AccountSetupPage({ onComplete }: AccountSetupPageProps) {
   const bankLinked = !!user?.bank_linked;
 
   return (
-    <div className="min-h-screen bg-background px-6 py-8">
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md flex-col">
+    <div className="h-full overflow-y-auto bg-background px-6 py-8">
+      <div className="mx-auto flex min-h-full max-w-md flex-col">
         <div className="mb-8">
           <div className="mb-4 flex items-center gap-2">
             {[0, 1].map((index) => (

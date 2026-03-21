@@ -71,7 +71,7 @@ export function TransactionAllocationPage({ transactionId, groupId, onNavigate, 
 
   if (loading || !tx) {
     return (
-      <div className={`h-[calc(100vh-48px-24px)] flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+      <div className={`h-full flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
         <p className={isDark ? 'text-slate-400' : 'text-slate-600'}>Loading...</p>
       </div>
     );
@@ -79,7 +79,7 @@ export function TransactionAllocationPage({ transactionId, groupId, onNavigate, 
 
   if (tx.status !== 'PENDING_ALLOCATION') {
     return (
-      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center px-5 ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+      <div className={`h-full flex flex-col items-center justify-center px-5 ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
         <p className={`text-center mb-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
           This transaction has already been {tx.status === 'SETTLED' ? 'settled' : 'finalized'}.
         </p>
@@ -97,7 +97,7 @@ export function TransactionAllocationPage({ transactionId, groupId, onNavigate, 
   const total = subtotal + tipInput;
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-full flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}

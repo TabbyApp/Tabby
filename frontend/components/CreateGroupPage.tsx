@@ -90,7 +90,7 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
 
   if (step === 'success') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background px-5 py-8">
+      <div className="h-full flex items-center justify-center bg-background px-5 py-8">
         <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 200, damping: 20 }} className="text-center w-full max-w-md">
           <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 200, damping: 20 }} className="w-24 h-24 rounded-full bg-primary flex items-center justify-center mx-auto mb-6 shadow-xl">
             <Check size={48} className="text-primary-foreground" strokeWidth={3} />
@@ -116,7 +116,7 @@ export function CreateGroupPage({ onNavigate, theme, onGroupCreated }: CreateGro
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-full flex flex-col bg-background">
       <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-card border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">
           <button onClick={() => onNavigate('groups')} className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center active:scale-95 transition-transform">

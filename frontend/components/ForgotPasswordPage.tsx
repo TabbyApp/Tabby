@@ -24,7 +24,7 @@ export function ForgotPasswordPage({ onNavigate, onBack, theme }: ForgotPassword
 
   if (step === 'sent') {
     return (
-      <div className={`h-[calc(100vh-48px)] flex flex-col items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'} px-5`}>
+      <div className={`h-full flex flex-col items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'} px-5`}>
         <motion.div
           initial={{ scale: 0.8 }}
           animate={{ scale: 1 }}
@@ -90,7 +90,7 @@ export function ForgotPasswordPage({ onNavigate, onBack, theme }: ForgotPassword
   }
 
   return (
-    <div className={`h-[calc(100vh-48px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
+    <div className={`h-full flex flex-col ${isDark ? 'bg-slate-900' : 'bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50'}`}>
       {/* Header */}
       <motion.div 
         initial={{ opacity: 0 }}

@@ -73,7 +73,7 @@ export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted, on
 
   if (!inviteCode) {
     return (
-      <div className="h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center px-5 bg-background">
+      <div className="h-full flex flex-col items-center justify-center px-5 bg-background">
         <p className="text-muted-foreground">Invalid or expired invite link.</p>
         <button
           onClick={() => onNavigate('home')}
@@ -86,7 +86,7 @@ export function AcceptInvitePage({ onNavigate, theme, inviteCode, onAccepted, on
   }
 
   return (
-    <div className="h-[calc(100vh-48px-24px)] flex flex-col bg-background">
+    <div className="h-full flex flex-col bg-background">
       <div className="flex-1 flex flex-col items-center justify-center px-5">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}

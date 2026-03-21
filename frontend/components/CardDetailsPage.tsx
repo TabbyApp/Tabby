@@ -51,7 +51,7 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
 
   if (!groupId) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center px-5 bg-background">
+      <div className="h-full flex flex-col items-center justify-center px-5 bg-background">
         <p className="mb-4 text-muted-foreground">No card selected</p>
         <button onClick={() => onNavigate('home')} className="text-primary font-semibold">Back to Home</button>
       </div>
@@ -60,7 +60,7 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
 
   if (loading || !groupData) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-background">
+      <div className="h-full flex flex-col items-center justify-center bg-background">
         <p className="text-muted-foreground">Loading...</p>
       </div>
     );
@@ -82,7 +82,7 @@ export function CardDetailsPage({ onNavigate, theme, groupId }: CardDetailsPageP
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-6 pb-6">
         <div className="mb-6">
           <div className="bg-card border border-border rounded-2xl p-6">
             <div className="flex items-start justify-between mb-8">

@@ -36,7 +36,7 @@ export function VirtualWalletPage({ onNavigate, theme }: VirtualWalletPageProps)
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-full flex flex-col bg-background">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}

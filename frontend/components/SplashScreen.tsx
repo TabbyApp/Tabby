@@ -17,7 +17,7 @@ export function SplashScreen({ onComplete, loadingMessage }: SplashScreenProps) 
   }, [onComplete]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="h-full flex items-center justify-center bg-background">
       <div className="relative w-full z-10">
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}

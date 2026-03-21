@@ -37,7 +37,7 @@ export function AppearanceSettingsPage({ onNavigate, theme, onThemeChange, theme
   ];
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-full flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
       {/* Header */}
       <motion.div 
         initial={{ opacity: 0 }}

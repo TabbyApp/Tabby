@@ -81,7 +81,7 @@ export function InviteAcceptPage({ inviteToken, onNavigate, theme }: InviteAccep
 
   if (loading) {
     return (
-      <div className={`h-[calc(100vh-48px-24px)] flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+      <div className={`h-full flex items-center justify-center ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
         <Loader size={32} className="animate-spin text-blue-500" />
       </div>
     );
@@ -89,7 +89,7 @@ export function InviteAcceptPage({ inviteToken, onNavigate, theme }: InviteAccep
 
   if (error && !invite) {
     return (
-      <div className={`h-[calc(100vh-48px-24px)] flex flex-col items-center justify-center px-6 ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+      <div className={`h-full flex flex-col items-center justify-center px-6 ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
         <AlertCircle size={48} className={isDark ? 'text-slate-500' : 'text-slate-400'} />
         <p className={`text-center mt-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{error}</p>
         <button
@@ -105,7 +105,7 @@ export function InviteAcceptPage({ inviteToken, onNavigate, theme }: InviteAccep
   if (!invite) return null;
 
   return (
-    <div className={`h-[calc(100vh-48px-24px)] flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
+    <div className={`h-full flex flex-col ${isDark ? 'bg-slate-900' : 'bg-[#F2F2F7]'}`}>
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}

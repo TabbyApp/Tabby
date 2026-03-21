@@ -74,7 +74,7 @@ export function ReceiptScanPage({ onNavigate, theme, realGroupId, onReceiptUploa
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="h-full flex flex-col bg-background">
       {/* Hidden file inputs */}
       <input
         ref={fileInputRef}

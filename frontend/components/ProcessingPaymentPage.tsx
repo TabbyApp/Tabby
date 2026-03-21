@@ -80,7 +80,7 @@ export function ProcessingPaymentPage({ onNavigate, theme, groupId, accountType,
   const total = txDisplay?.total ?? receiptData?.total ?? members.reduce((sum, m) => sum + m.amount, 0);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-background px-5">
+    <div className="h-full flex flex-col items-center justify-center bg-background px-5">
       <AnimatePresence mode="wait">
         {step === 'processing' ? (
           <motion.div
